@@ -1,0 +1,31 @@
+planned an AD (active directory) security lab as a learning project for a mock law firm company "Pearson Specter Litt"
+
+will create a DC (domain controller) first which is the server running AD in vmware workstation
+
+choosing domain name:
+decision: picked the internal domain name for this lab to be `ad.pearsonspecterlitt.com`.
+reason: `.local` is reserved for mDNS, so i followed the pattern Microsoft recommends. i understand this in a way to avoid naming conflicts in the future.
+note: i do not own `pearsonspecterlitt.com`
+
+i have two options on windows server install types:
+1. desktop experience with GUI
+2. server core with CLI, lighter
+decision: install desktop experience while doing ad work in powershell anyway
+
+choosing server version:
+1. server 2022 that has more tutorials and troubleshooting threads online
+2. server 2025 taht has newer AD features and some hardening on by default
+decision: server 2025 this will give me potential log material when it comes to troubleshooting
+tradeoff: may spend more time figuring things out myself rather than looking up the answer
+
+choosing VMware networking mode:
+1. bridged that makes the VMs appear as real machines on my home network, visible to my router. risky since i will run attack tooling and deliberately break authentication.
+2. NAT that makes the VMs share the main OS' internet connection. invisible to my home network since they will have their own private subnets.
+3. host-only that makes the VMs have no internet connection at all. only communication is to other VMs and the main OS.
+decision: build on nat to activate, update, and download tools then switch to host-only since internet access is unnecessary
+
+what's next:
+1. download the server 2025 evaluation ISO from Microsoft
+2. create the VM with 4 GB RAM, 2 vCPU, 80 GB disk, NAT
+3. install desktop experience
+4. set administrator password, rename the machine
