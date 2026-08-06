@@ -1,0 +1,36 @@
+downloaded windows server 2025 iso from Microsoft
+sha256: 7B052573BA7894C9924E3E87BA732CCD354D18CB75A883EFA9B900EA125BFD51
+
+open VMware workstation pro 26H1
+create new virtual machine
+Hardware - Workstation 25H2 or later (default)
+Installer disc - I will install the operating system later
+Guest OS - Microsoft windows, Windows Server 2025
+Name - DC01
+Firmware - UEFI, no secure boot (default)
+Processors - 2, 1 core each (default)
+Memory - 4096MB
+Network - NAT (default)
+I/O controller type - LSI Logic SAS (default)
+Virtual disk type - NVMe
+Max disk size - 80GB, single file
+select VM settings for CD/DVD to windows server 2025 iso, connect at power on
+
+boot virtual machine
+install windows server 2025 standard evaluation (desktop experience) on unallocated space (80GB)
+user name - Administrator
+password set
+
+open virtual network editor
+dhcp nat pool for VMnet8 (NAT) is `.128` to `.254`
+picked a static address outside that range for DC01 `192.168.208.10`
+find interface index using ```Get-NetAdapter``` which is 6
+set the address using ```New-NetIPAddress -InterfaceIndex 6 -IPAddress 192.168.208.10 -PrefixLength 24 -DefaultGateway 192.168.208.2```
+didn't work... remove the old ip address from dhcp first using ```Remove-NetIPAddress```
+```New-NetIPAddress``` now worked
+verified using ```ipconfig```
+i need a working name resolution for updates and tool downloads using my own NAT gateway ```Set-DnsClientServerAddress -InterfaceIndex 6 -ServerAddresses 192.168.208.2```
+confirmed that it actually resolves by using ```nslookup Microsoft.com```
+DNS has to change to `192.168.208.10` after promoting DC01 to domain controller
+run windows update
+restart server for updates
