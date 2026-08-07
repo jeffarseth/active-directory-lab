@@ -1,3 +1,5 @@
+2026-08-04: Scope, scenario, and build decisions
+
 planned an AD (active directory) security lab as a learning project for a mock law firm company "Pearson Specter Litt"
 
 will create a DC (domain controller) first which is the server running AD in vmware workstation
