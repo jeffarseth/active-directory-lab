@@ -1,0 +1,93 @@
+2026-08-07: AD DS role install and forest promotion
+
+verify static address, gateway, and gateway dns using:
+```
+PS C:\Users\Administrator> Get-NetIPConfiguration
+
+InterfaceAlias       : Ethernet0
+InterfaceIndex       : 6
+InterfaceDescription : Intel(R) 82574L Gigabit Network Connection
+NetProfile.Name      : Network
+IPv4Address          : 192.168.208.10
+IPv6DefaultGateway   :
+IPv4DefaultGateway   : 192.168.208.2
+DNSServer            : 192.168.208.2
+```
+
+use ```Install-WindowsFeature -Name AD-Domain-Services -IncludeManagementTools``` to install active directory domain services role, with `-IncludeManagementTools` used to pull active directory tools
+role installed
+restart not needed
+
+choosing netbios name:
+1. generic `AD` which is the default derivation
+2. `PSL` which represents the firm abbreviated
+decision: `PSL` identifies the organization, not a technical requirement
+
+choosing dsrm password:
+recovery mode authentication fallback
+password set
+
+choosing whether or not DC runs DNS:
+AD requires DNS
+1. install AD-integrated DNS
+2. not installing requires another DNS server
+decision: install AD-integrated DNS by default
+
+database paths, `-DatabasePath`, `-LogPath`, `-SysvolPath`, are on default
+
+time to finally promote:
+```Install-ADDSForest -DomainName ad.pearsonspecterlitt.com -DomainNetbiosName PSL```
+restarted
+
+confirm netbios:
+```Get-ADDomain```
+netbios name: PSL
+
+confirm dns:
+```Get-NetIPConfiguration```
+DNSServer: ::1
+           127.0.0.1
+installer chose a local loopback
+change it to 192.168.208.10 for client dns service troubleshooting using ```Set-DnsClientServerAddress -InterfaceIndex 6 -ServerAddresses 192.168.208.10```
+
+confirm dns:
+```Get-NetIPConfiguration```
+DNSServer: ::1
+           192.168.208.10
+ipv4 is now `192.168.208.10`
+
+choosing ipv6 dns:
+1. change it to DC01's ipv6 address - not stable since vmware's nat doesn't hand out routable ipv6 by default
+2. clear ipv6 dns entry and force ipv4
+3. leave it as ::1 and risk loopback
+decision: remove ipv6 dns resolution for predictability that it paths on ipv4
+clear both server addresses using ```Set-DnsClientServerAddress -InterfaceIndex 6 -ResetServerAddresses```
+check using ```Get-DnsClientServerAddress -InterfaceIndex 6```
+set ipv4 server address again using ```Set-DnsClientServerAddress -InterfaceIndex 6 -ServerAddresses 192.168.208.10```
+check again using ```Get-DnsClientServerAddress -InterfaceIndex 6```
+
+verify srv records:
+```
+PS C:\Users\Administrator> Get-DnsServerResourceRecord -ZoneName "_msdcs.ad.pearsonspecterlitt.com"
+
+HostName                  RecordType Type       Timestamp            TimeToLive      RecordData
+--------                  ---------- ----       ---------            ----------      ----------
+@                         NS         2          0                    01:00:00        dc01.ad.pearsonspecterlitt.com.
+@                         SOA        6          0                    01:00:00        [12][dc01.ad.pearsonspecterlitt.com.][hostmaste...
+c301d526-9f34-4aa5-a37... CNAME      5          8/7/2026 2:00:00 AM  00:10:00        dc01.ad.pearsonspecterlitt.com.
+_kerberos._tcp.Default... SRV        33         8/7/2026 2:00:00 AM  00:10:00        [0][100][88][dc01.ad.pearsonspecterlitt.com.]
+_ldap._tcp.Default-Fir... SRV        33         8/7/2026 2:00:00 AM  00:10:00        [0][100][389][dc01.ad.pearsonspecterlitt.com.]
+_kerberos._tcp.dc         SRV        33         8/7/2026 2:00:00 AM  00:10:00        [0][100][88][dc01.ad.pearsonspecterlitt.com.]
+_ldap._tcp.dc             SRV        33         8/7/2026 2:00:00 AM  00:10:00        [0][100][389][dc01.ad.pearsonspecterlitt.com.]
+_ldap._tcp.9229cee3-07... SRV        33         8/7/2026 2:00:00 AM  00:10:00        [0][100][389][dc01.ad.pearsonspecterlitt.com.]
+gc                        A          1          8/7/2026 2:00:00 AM  00:10:00        192.168.208.10
+_ldap._tcp.Default-Fir... SRV        33         8/7/2026 2:00:00 AM  00:10:00        [0][100][3268][dc01.ad.pearsonspecterlitt.com.]
+_ldap._tcp.gc             SRV        33         8/7/2026 2:00:00 AM  00:10:00        [0][100][3268][dc01.ad.pearsonspecterlitt.com.]
+_ldap._tcp.pdc            SRV        33         8/7/2026 2:00:00 AM  00:10:00        [0][100][389][dc01.ad.pearsonspecterlitt.com.]
+```
+ldap and kerberos points to dc01
+
+what's next:
+1. ou structure
+2. users and groups
+3. ws01
