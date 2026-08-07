@@ -1,3 +1,5 @@
+2026-08-05: DC01 provisioning and network configuration
+
 downloaded windows server 2025 iso from Microsoft
 sha256: 7B052573BA7894C9924E3E87BA732CCD354D18CB75A883EFA9B900EA125BFD51
 
@@ -34,3 +36,6 @@ confirmed that it actually resolves by using ```nslookup Microsoft.com```
 DNS has to change to `192.168.208.10` after promoting DC01 to domain controller
 run windows update
 restart server for updates
+
+what's next:
+1. windows server to domain controller promotion
