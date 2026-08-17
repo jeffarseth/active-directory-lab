@@ -1,0 +1,71 @@
+2026-08-16: OU structure design
+
+planning the organizational unit (ou):
+i am going to design user-account ous first since i imagine that it is always the computers that work around the humans, not the other way around
+these user ous should be based mainly with departments since it’s easier to understand for someone who might not have the correct prerequisites on law firms
+a simple 40-person firm might have legal, administration, finance/billing, and it departments
+
+choosing user ou placement:
+1. directly under the domain (less nesting)
+2. inside `PSL-Users` so shared user policies can be linked once
+decision: `PSL-Users` will contain the four department ous since shared gpos can apply at the parent, while department-specific gpos can still apply below it
+
+user ou structure:
+ad.pearsonspecterlitt.com
+	PSL-Users
+		Legal
+		Administration
+		Finance-Billing
+		IT
+
+choosing workstation ou placement:
+1. one `Workstations` ou
+2. separate departmental ous
+decision: one `Workstations` ou for `WS01` and `WS02`; no differences in their computer policy requirements have been identified
+
+check every ou in the domain:
+```
+PS C:\Users\Administrator> Get-ADOrganizationalUnit -Filter * | Select-Object Name, DistinguishedName
+
+Name               DistinguishedName
+----               -----------------
+Domain Controllers OU=Domain Controllers,DC=ad,DC=pearsonspecterlitt,DC=com
+```
+no custom ous have been created yet
+
+implement parent `PSL-Users` ou:
+```
+PS C:\Users\Administrator> New-ADOrganizationalUnit -Name "PSL-Users" -Path "DC=ad,DC=pearsonspecterlitt,DC=com" -ProtectedFromAccidentalDeletion $true -PassThru
+```
+
+implement four department ous under `PSL-Users`:
+```
+PS C:\Users\Administrator> New-ADOrganizationalUnit -Name "Legal" -Path "OU=PSL-Users,DC=ad,DC=pearsonspecterlitt,DC=com" -ProtectedFromAccidentalDeletion $true -PassThru
+PS C:\Users\Administrator> New-ADOrganizationalUnit -Name "Administration" -Path "OU=PSL-Users,DC=ad,DC=pearsonspecterlitt,DC=com" -ProtectedFromAccidentalDeletion $true -PassThru
+PS C:\Users\Administrator> New-ADOrganizationalUnit -Name "Finance-Billing" -Path "OU=PSL-Users,DC=ad,DC=pearsonspecterlitt,DC=com" -ProtectedFromAccidentalDeletion $true -PassThru
+PS C:\Users\Administrator> New-ADOrganizationalUnit -Name "IT" -Path "OU=PSL-Users,DC=ad,DC=pearsonspecterlitt,DC=com" -ProtectedFromAccidentalDeletion $true -PassThru
+```
+
+implement parent `Workstations` ou:
+```
+PS C:\Users\Administrator> New-ADOrganizationalUnit -Name "Workstations" -Path "DC=ad,DC=pearsonspecterlitt,DC=com" -ProtectedFromAccidentalDeletion $true -PassThru
+```
+
+check ous again:
+```
+PS C:\Users\Administrator> Get-ADOrganizationalUnit -Filter * | Select-Object Name, DistinguishedName
+
+
+Name               DistinguishedName
+----               -----------------
+Domain Controllers OU=Domain Controllers,DC=ad,DC=pearsonspecterlitt,DC=com
+PSL-Users          OU=PSL-Users,DC=ad,DC=pearsonspecterlitt,DC=com
+Legal              OU=Legal,OU=PSL-Users,DC=ad,DC=pearsonspecterlitt,DC=com
+Administration     OU=Administration,OU=PSL-Users,DC=ad,DC=pearsonspecterlitt,DC=com
+Finance-Billing    OU=Finance-Billing,OU=PSL-Users,DC=ad,DC=pearsonspecterlitt,DC=com
+IT                 OU=IT,OU=PSL-Users,DC=ad,DC=pearsonspecterlitt,DC=com
+Workstations       OU=Workstations,DC=ad,DC=pearsonspecterlitt,DC=com
+```
+
+what's next:
+1. design the user accounts for each department
