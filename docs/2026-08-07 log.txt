@@ -89,5 +89,3 @@ ldap and kerberos points to dc01
 
 what's next:
 1. ou structure
-2. users and groups
-3. ws01
