@@ -16,7 +16,7 @@ decision: install desktop experience while doing ad work in powershell anyway
 
 choosing server version:
 1. server 2022 that has more tutorials and troubleshooting threads online
-2. server 2025 taht has newer AD features and some hardening on by default
+2. server 2025 that has newer AD features and some hardening on by default
 decision: server 2025 this will give me potential log material when it comes to troubleshooting
 tradeoff: may spend more time figuring things out myself rather than looking up the answer
 
