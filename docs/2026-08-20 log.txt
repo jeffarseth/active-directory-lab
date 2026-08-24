@@ -1,0 +1,297 @@
+2026-08-20: User account design
+
+planning user accounts:
+i am going to choose an example out of a law-firm roster based on the tv show "Suits".
+
+Legal: two partners, two associates, one paralegal
+Administration: one legal administrative assistant/receptionist
+Finance-Billing: one billing/bookkeeping specialist
+IT: one IT generalist/help-desk technician
+
+naming convention is going to be first initial + surname.
+
+| Department      | Lab role            | Employee         | Username     |
+| --------------- | ------------------- | ---------------- | ------------ |
+| Legal           | Partner             | Harvey Specter   | `hspecter`   |
+| Legal           | Partner             | Louis Litt       | `llitt`      |
+| Legal           | Associate           | Mike Ross        | `mross`      |
+| Legal           | Associate           | Katrina Bennett  | `kbennett`   |
+| Legal           | Paralegal           | Rachel Zane      | `rzane`      |
+| Administration  | Legal administrator | Donna Paulsen    | `dpaulsen`   |
+| Finance-Billing | Billing specialist  | Jonathan Sidwell | `jsidwell`   |
+| IT              | IT generalist       | Benjamin         | `benjamin`   |
+
+account creation:
+accounts start disabled so they cannot authenticate until fully configured, reducing the attack surface during provisioning.
+each AD user will have 'Title' and 'Department' for scalability in terms of searching and filtering.
+
+creating the first disabled user:
+```
+PS C:\Users\Administrator> New-ADUser -Name "Harvey Specter" -DisplayName "Harvey Specter" -GivenName "Harvey" -Surname "Specter" -SamAccountName "hspecter" -UserPrincipalName "hspecter@ad.pearsonspecterlitt.com" -Title "Partner" -Department "Legal" -Path "OU=Legal,OU=PSL-Users,DC=ad,DC=pearsonspecterlitt,DC=com" -Enabled $false -PassThru
+
+
+DistinguishedName : CN=Harvey Specter,OU=Legal,OU=PSL-Users,DC=ad,DC=pearsonspecterlitt,DC=com
+Enabled           : False
+GivenName         : Harvey
+Name              : Harvey Specter
+ObjectClass       : user
+ObjectGUID        : 1b95eb17-1e8e-416e-a789-f5975fa0bc01
+SamAccountName    : hspecter
+SID               : S-1-5-21-1881315258-3822834566-1441680494-1103
+Surname           : Specter
+UserPrincipalName : hspecter@ad.pearsonspecterlitt.com
+```
+note:
+`SamAccountName` creates the older login format: PSL\hspecter
+`UserPrincipalName` creates the modern login format: hspecter@ad.pearsonspecterlitt.com
+
+verify first harvey's title and department:
+```
+PS C:\Users\Administrator> Get-ADUser -Identity "hspecter" -Properties Title,Department | Select-Object Name,SamAccountName,UserPrincipalName,Enabled,Title,Department,DistinguishedName
+
+
+Name              : Harvey Specter
+SamAccountName    : hspecter
+UserPrincipalName : hspecter@ad.pearsonspecterlitt.com
+Enabled           : False
+Title             : Partner
+Department        : Legal
+DistinguishedName : CN=Harvey Specter,OU=Legal,OU=PSL-Users,DC=ad,DC=pearsonspecterlitt,DC=com
+```
+
+and now, for the rest of the accounts...
+```
+PS C:\Users\Administrator> New-ADUser -Name "Louis Litt" -DisplayName "Louis Litt" -GivenName "Louis" -Surname "Litt" -SamAccountName "llitt" -UserPrincipalName "llitt@ad.pearsonspecterlitt.com" -Title "Partner" -Department "Legal" -Path "OU=Legal,OU=PSL-Users,DC=ad,DC=pearsonspecterlitt,DC=com" -Enabled $false -PassThru
+
+
+DistinguishedName : CN=Louis Litt,OU=Legal,OU=PSL-Users,DC=ad,DC=pearsonspecterlitt,DC=com
+Enabled           : False
+GivenName         : Louis
+Name              : Louis Litt
+ObjectClass       : user
+ObjectGUID        : 86d559b1-f5a4-4f42-9a90-fd53cd0c392e
+SamAccountName    : llitt
+SID               : S-1-5-21-1881315258-3822834566-1441680494-1104
+Surname           : Litt
+UserPrincipalName : llitt@ad.pearsonspecterlitt.com
+```
+```
+PS C:\Users\Administrator> New-ADUser -Name "Mike Ross" -DisplayName "Mike Ross" -GivenName "Mike" -Surname "Ross" -SamAccountName "mross" -UserPrincipalName "mross@ad.pearsonspecterlitt.com" -Title "Associate" -Department "Legal" -Path "OU=Legal,OU=PSL-Users,DC=ad,DC=pearsonspecterlitt,DC=com" -Enabled $false -PassThru
+
+
+DistinguishedName : CN=Mike Ross,OU=Legal,OU=PSL-Users,DC=ad,DC=pearsonspecterlitt,DC=com
+Enabled           : False
+GivenName         : Mike
+Name              : Mike Ross
+ObjectClass       : user
+ObjectGUID        : bc1f857f-3d8e-439b-a886-0a84f9f3ad18
+SamAccountName    : mross
+SID               : S-1-5-21-1881315258-3822834566-1441680494-1105
+Surname           : Ross
+UserPrincipalName : mross@ad.pearsonspecterlitt.com
+```
+```
+PS C:\Users\Administrator> New-ADUser -Name "Katrina Bennett" -DisplayName "Katrina Bennett" -GivenName "Katrina" -Surname "Bennett" -SamAccountName "kbennett" -UserPrincipalName "kbennett@ad.pearsonspecterlitt.com" -Title "Associate" -Department "Legal" -Path "OU=Legal,OU=PSL-Users,DC=ad,DC=pearsonspecterlitt,DC=com" -Enabled $false -PassThru
+
+
+DistinguishedName : CN=Katrina Bennett,OU=Legal,OU=PSL-Users,DC=ad,DC=pearsonspecterlitt,DC=com
+Enabled           : False
+GivenName         : Katrina
+Name              : Katrina Bennett
+ObjectClass       : user
+ObjectGUID        : 6c6542c6-b0d8-4c4a-8ba7-3d27f911be87
+SamAccountName    : kbennett
+SID               : S-1-5-21-1881315258-3822834566-1441680494-1106
+Surname           : Bennett
+UserPrincipalName : kbennett@ad.pearsonspecterlitt.com
+```
+```
+PS C:\Users\Administrator> New-ADUser -Name "Rachel Zane" -DisplayName "Rachel Zane" -GivenName "Rachel" -Surname "Zane" -SamAccountName "rzane" -UserPrincipalName "rzane@ad.pearsonspecterlitt.com" -Title "Paralegal" -Department "Legal" -Path "OU=Legal,OU=PSL-Users,DC=ad,DC=pearsonspecterlitt,DC=com" -Enabled $false -PassThru
+
+
+DistinguishedName : CN=Rachel Zane,OU=Legal,OU=PSL-Users,DC=ad,DC=pearsonspecterlitt,DC=com
+Enabled           : False
+GivenName         : Rachel
+Name              : Rachel Zane
+ObjectClass       : user
+ObjectGUID        : 956888b1-3759-4faa-962c-4e2bd07d5aa9
+SamAccountName    : rzane
+SID               : S-1-5-21-1881315258-3822834566-1441680494-1107
+Surname           : Zane
+UserPrincipalName : rzane@ad.pearsonspecterlitt.com
+```
+```
+PS C:\Users\Administrator> New-ADUser -Name "Donna Paulsen" -DisplayName "Donna Paulsen" -GivenName "Donna" -Surname "Paulsen" -SamAccountName "dpaulsen" -UserPrincipalName "dpaulsen@ad.pearsonspecterlitt.com" -Title "Legal Administrator" -Department "Administration" -Path "OU=Administration,OU=PSL-Users,DC=ad,DC=pearsonspecterlitt,DC=com" -Enabled $false -PassThru
+
+
+DistinguishedName : CN=Donna Paulsen,OU=Administration,OU=PSL-Users,DC=ad,DC=pearsonspecterlitt,DC=com
+Enabled           : False
+GivenName         : Donna
+Name              : Donna Paulsen
+ObjectClass       : user
+ObjectGUID        : e5343c00-47f4-43ba-8380-ea97ef232ade
+SamAccountName    : dpaulsen
+SID               : S-1-5-21-1881315258-3822834566-1441680494-1108
+Surname           : Paulsen
+UserPrincipalName : dpaulsen@ad.pearsonspecterlitt.com
+```
+```
+PS C:\Users\Administrator> New-ADUser -Name "Jonathan Sidwell" -DisplayName "Jonathan Sidwell" -GivenName "Jonathan" -Surname "Sidwell" -SamAccountName "jsidwell" -UserPrincipalName "jsidwell@ad.pearsonspecterlitt.com" -Title "Billing Specialist" -Department "Finance-Billing" -Path "OU=Finance-Billing,OU=PSL-Users,DC=ad,DC=pearsonspecterlitt,DC=com" -Enabled $false -PassThru
+
+
+DistinguishedName : CN=Jonathan Sidwell,OU=Finance-Billing,OU=PSL-Users,DC=ad,DC=pearsonspecterlitt,DC=com
+Enabled           : False
+GivenName         : Jonathan
+Name              : Jonathan Sidwell
+ObjectClass       : user
+ObjectGUID        : ab970878-f237-4d05-98d2-f8f3f642f7e8
+SamAccountName    : jsidwell
+SID               : S-1-5-21-1881315258-3822834566-1441680494-1109
+Surname           : Sidwell
+UserPrincipalName : jsidwell@ad.pearsonspecterlitt.com
+```
+```
+PS C:\Users\Administrator> New-ADUser -Name "Benjamin" -DisplayName "Benjamin" -GivenName "Benjamin" -SamAccountName "benjamin" -UserPrincipalName "benjamin@ad.pearsonspecterlitt.com" -Title "IT Generalist" -Department "IT" -Path "OU=IT,OU=PSL-Users,DC=ad,DC=pearsonspecterlitt,DC=com" -Enabled $false -PassThru
+
+
+DistinguishedName : CN=Benjamin,OU=IT,OU=PSL-Users,DC=ad,DC=pearsonspecterlitt,DC=com
+Enabled           : False
+GivenName         : Benjamin
+Name              : Benjamin
+ObjectClass       : user
+ObjectGUID        : fab77882-1d01-4bb2-83a3-12382a898145
+SamAccountName    : benjamin
+SID               : S-1-5-21-1881315258-3822834566-1441680494-1110
+Surname           :
+UserPrincipalName : benjamin@ad.pearsonspecterlitt.com
+```
+
+verify all 8 accounts' title and department:
+```PS C:\Users\Administrator> Get-ADUser -Filter * -SearchBase "OU=PSL-Users,DC=ad,DC=pearsonspecterlitt,DC=com" -SearchScope Subtree -Properties Title,Department | Sort-Object Department,Name | Select-Object Name,SamAccountName,Enabled,Title,Department,DistinguishedName
+
+
+Name              : Donna Paulsen
+SamAccountName    : dpaulsen
+Enabled           : False
+Title             : Legal Administrator
+Department        : Administration
+DistinguishedName : CN=Donna Paulsen,OU=Administration,OU=PSL-Users,DC=ad,DC=pearsonspecterlitt,DC=com
+
+Name              : Jonathan Sidwell
+SamAccountName    : jsidwell
+Enabled           : False
+Title             : Billing Specialist
+Department        : Finance-Billing
+DistinguishedName : CN=Jonathan Sidwell,OU=Finance-Billing,OU=PSL-Users,DC=ad,DC=pearsonspecterlitt,DC=com
+
+Name              : Benjamin
+SamAccountName    : benjamin
+Enabled           : False
+Title             : IT Generalist
+Department        : IT
+DistinguishedName : CN=Benjamin,OU=IT,OU=PSL-Users,DC=ad,DC=pearsonspecterlitt,DC=com
+
+Name              : Harvey Specter
+SamAccountName    : hspecter
+Enabled           : False
+Title             : Partner
+Department        : Legal
+DistinguishedName : CN=Harvey Specter,OU=Legal,OU=PSL-Users,DC=ad,DC=pearsonspecterlitt,DC=com
+
+Name              : Katrina Bennett
+SamAccountName    : kbennett
+Enabled           : False
+Title             : Associate
+Department        : Legal
+DistinguishedName : CN=Katrina Bennett,OU=Legal,OU=PSL-Users,DC=ad,DC=pearsonspecterlitt,DC=com
+
+Name              : Louis Litt
+SamAccountName    : llitt
+Enabled           : False
+Title             : Partner
+Department        : Legal
+DistinguishedName : CN=Louis Litt,OU=Legal,OU=PSL-Users,DC=ad,DC=pearsonspecterlitt,DC=com
+
+Name              : Mike Ross
+SamAccountName    : mross
+Enabled           : False
+Title             : Associate
+Department        : Legal
+DistinguishedName : CN=Mike Ross,OU=Legal,OU=PSL-Users,DC=ad,DC=pearsonspecterlitt,DC=com
+
+Name              : Rachel Zane
+SamAccountName    : rzane
+Enabled           : False
+Title             : Paralegal
+Department        : Legal
+DistinguishedName : CN=Rachel Zane,OU=Legal,OU=PSL-Users,DC=ad,DC=pearsonspecterlitt,DC=com
+```
+
+benjamin's privileges:
+benjamin will have a standard account for ordinary work and an admin account for necessary privileged tasks like resetting passwords.
+this will reduce administrative credential exposure.
+benjamin will be the firm’s sole it generalist and ad administrator.
+`benjamin-admin` will begin with delegated permissions so the lab can demonstrate and test permission boundaries.
+the initial scope will only allow resetting passwords and unlocking accounts within PSL-Users without control over ous, gpos, computers, or admin accounts  
+
+creating another ou for admins:
+a separate `PSL-Admins` ou maintains cleaner gpo targeting.
+```
+PS C:\Users\Administrator> New-ADOrganizationalUnit -Name "PSL-Admins" -Path "DC=ad,DC=pearsonspecterlitt,DC=com" -ProtectedFromAccidentalDeletion $true -PassThru
+
+
+City                     :
+Country                  :
+DistinguishedName        : OU=PSL-Admins,DC=ad,DC=pearsonspecterlitt,DC=com
+LinkedGroupPolicyObjects : {}
+ManagedBy                :
+Name                     : PSL-Admins
+ObjectClass              : organizationalUnit
+ObjectGUID               : 0ff11396-9b90-44d3-b9a9-91a28cbc2c0e
+PostalCode               :
+State                    :
+StreetAddress            :
+```
+verify:
+```
+PS C:\Users\Administrator> Get-ADOrganizationalUnit -Identity "OU=PSL-Admins,DC=ad,DC=pearsonspecterlitt,DC=com" -Properties ProtectedFromAccidentalDeletion | Select-Object Name,DistinguishedName,ProtectedFromAccidentalDeletion
+
+Name       DistinguishedName                                ProtectedFromAccidentalDeletion
+----       -----------------                                -------------------------------
+PSL-Admins OU=PSL-Admins,DC=ad,DC=pearsonspecterlitt,DC=com                            True
+```
+
+creating admin account for benjamin:
+```
+PS C:\Users\Administrator> New-ADUser -Name "Benjamin Admin" -DisplayName "Benjamin (Admin)" -GivenName "Benjamin" -SamAccountName "benjamin-admin" -UserPrincipalName "benjamin-admin@ad.pearsonspecterlitt.com" -Title "IT Generalist" -Department "IT" -Description "Privileged administrative account for Benjamin" -Path "OU=PSL-Admins,DC=ad,DC=pearsonspecterlitt,DC=com" -Enabled $false -PassThru
+
+
+DistinguishedName : CN=Benjamin Admin,OU=PSL-Admins,DC=ad,DC=pearsonspecterlitt,DC=com
+Enabled           : False
+GivenName         : Benjamin
+Name              : Benjamin Admin
+ObjectClass       : user
+ObjectGUID        : de56ffa4-6f4f-45ea-9daf-759f0baba6c2
+SamAccountName    : benjamin-admin
+SID               : S-1-5-21-1881315258-3822834566-1441680494-1111
+Surname           :
+UserPrincipalName : benjamin-admin@ad.pearsonspecterlitt.com
+```
+verify:
+```
+PS C:\Users\Administrator> Get-ADUser -Identity "benjamin-admin" -Properties DisplayName,Title,Department,Description | Select-Object Name,DisplayName,SamAccountName,UserPrincipalName,Enabled,Title,Department,Description,DistinguishedName
+
+
+Name              : Benjamin Admin
+DisplayName       : Benjamin (Admin)
+SamAccountName    : benjamin-admin
+UserPrincipalName : benjamin-admin@ad.pearsonspecterlitt.com
+Enabled           : False
+Title             : IT Generalist
+Department        : IT
+Description       : Privileged administrative account for Benjamin
+DistinguishedName : CN=Benjamin Admin,OU=PSL-Admins,DC=ad,DC=pearsonspecterlitt,DC=com
+```
+
+what's next:
+1. create the delegated user-support security group

@@ -1,0 +1,216 @@
+2026-08-24: User-support security group and ACL delegation
+
+create `GG-PSL-User-Support` as a global security group so administrators gain or lose permissions through group membership:
+```
+PS C:\Users\Administrator> New-ADGroup -Name "GG-PSL-User-Support" -SamAccountName "GG-PSL-User-Support" -GroupCategory Security -GroupScope Global -Path "OU=PSL-Admins,DC=ad,DC=pearsonspecterlitt,DC=com" -Description "Delegated password reset and account unlock permissions for PSL-Users" -PassThru
+
+
+DistinguishedName : CN=GG-PSL-User-Support,OU=PSL-Admins,DC=ad,DC=pearsonspecterlitt,DC=com
+GroupCategory     : Security
+GroupScope        : Global
+Name              : GG-PSL-User-Support
+ObjectClass       : group
+ObjectGUID        : 269b46b1-c016-4f02-ae95-7f962e58539b
+SamAccountName    : GG-PSL-User-Support
+SID               : S-1-5-21-1881315258-3822834566-1441680494-1112
+```
+verify:
+```
+PS C:\Users\Administrator> Get-ADGroup -Identity "GG-PSL-User-Support" -Properties Description | Select-Object Name,SamAccountName,GroupCategory,GroupScope,Description,DistinguishedName
+
+
+Name              : GG-PSL-User-Support
+SamAccountName    : GG-PSL-User-Support
+GroupCategory     : Security
+GroupScope        : Global
+Description       : Delegated password reset and account unlock permissions for PSL-Users
+DistinguishedName : CN=GG-PSL-User-Support,OU=PSL-Admins,DC=ad,DC=pearsonspecterlitt,DC=com
+```
+
+add `benjamin-admin` as the first member:
+```
+PS C:\Users\Administrator> Add-ADGroupMember -Identity "GG-PSL-User-Support" -Members "benjamin-admin"
+```
+verify:
+```
+PS C:\Users\Administrator> Get-ADGroupMember -Identity "GG-PSL-User-Support" | Select-Object Name,SamAccountName,ObjectClass,DistinguishedName
+
+Name           SamAccountName ObjectClass DistinguishedName
+----           -------------- ----------- -----------------
+Benjamin Admin benjamin-admin user        CN=Benjamin Admin,OU=PSL-Admins,DC=ad,DC=pearsonspecterlitt,DC=com
+```
+
+prepare the access control list (ACL) delegation by loading these variables:
+```
+PS C:\Users\Administrator> $TargetOU = "AD:\OU=PSL-Users,DC=ad,DC=pearsonspecterlitt,DC=com"
+PS C:\Users\Administrator> $GroupSID = (Get-ADGroup -Identity "GG-PSL-User-Support").SID
+PS C:\Users\Administrator> $UserClassGuid = [Guid]"bf967aba-0de6-11d0-a285-00aa003049e2"
+PS C:\Users\Administrator> $ResetPasswordGuid = [Guid]"00299570-246d-11d0-a768-00aa006e0529"
+PS C:\Users\Administrator> $LockoutTimeGuid = [Guid]"28630ebf-41d5-11d1-a9c1-0000f80367c1"
+PS C:\Users\Administrator> $Acl = Get-Acl -Path $TargetOU
+```
+verify:
+```
+PS C:\Users\Administrator> [pscustomobject]@{TargetOU=$TargetOU;GroupSID=$GroupSID.Value;UserClassGuid=$UserClassGuid;ResetPasswordGuid=$ResetPasswordGuid;LockoutTimeGuid=$LockoutTimeGuid;AclOwner=$Acl.Owner} | Format-List
+
+
+TargetOU          : AD:\OU=PSL-Users,DC=ad,DC=pearsonspecterlitt,DC=com
+GroupSID          : S-1-5-21-1881315258-3822834566-1441680494-1112
+UserClassGuid     : bf967aba-0de6-11d0-a285-00aa003049e2
+ResetPasswordGuid : 00299570-246d-11d0-a768-00aa006e0529
+LockoutTimeGuid   : 28630ebf-41d5-11d1-a9c1-0000f80367c1
+AclOwner          : PSL\Domain Admins
+```
+
+create the password-reset access control entry (ACE) in memory:
+```
+PS C:\Users\Administrator> $ResetPasswordRule = [System.DirectoryServices.ActiveDirectoryAccessRule]::new($GroupSID,[System.DirectoryServices.ActiveDirectoryRights]::ExtendedRight,[System.Security.AccessControl.AccessControlType]::Allow,$ResetPasswordGuid,[System.DirectoryServices.ActiveDirectorySecurityInheritance]::Descendents,$UserClassGuid)
+```
+verify:
+```
+PS C:\Users\Administrator> $ResetPasswordRule | Select-Object IdentityReference,ActiveDirectoryRights,AccessControlType,ObjectType,InheritanceType,InheritedObjectType | Format-List
+
+
+IdentityReference     : S-1-5-21-1881315258-3822834566-1441680494-1112
+ActiveDirectoryRights : ExtendedRight
+AccessControlType     : Allow
+ObjectType            : 00299570-246d-11d0-a768-00aa006e0529
+InheritanceType       : Descendents
+InheritedObjectType   : bf967aba-0de6-11d0-a285-00aa003049e2
+```
+
+create the unlocking accounts ACE by allowing writes to `lockoutTime` in memory:
+```
+PS C:\Users\Administrator> $UnlockAccountRule = [System.DirectoryServices.ActiveDirectoryAccessRule]::new($GroupSID,[System.DirectoryServices.ActiveDirectoryRights]::WriteProperty,[System.Security.AccessControl.AccessControlType]::Allow,$LockoutTimeGuid,[System.DirectoryServices.ActiveDirectorySecurityInheritance]::Descendents,$UserClassGuid)
+```
+verify:
+```
+PS C:\Users\Administrator> $UnlockAccountRule | Select-Object IdentityReference,ActiveDirectoryRights,AccessControlType,ObjectType,InheritanceType,InheritedObjectType | Format-List
+
+
+IdentityReference     : S-1-5-21-1881315258-3822834566-1441680494-1112
+ActiveDirectoryRights : WriteProperty
+AccessControlType     : Allow
+ObjectType            : 28630ebf-41d5-11d1-a9c1-0000f80367c1
+InheritanceType       : Descendents
+InheritedObjectType   : bf967aba-0de6-11d0-a285-00aa003049e2
+```
+
+add both rules to the local ACL copy:
+```
+PS C:\Users\Administrator> $Acl.AddAccessRule($ResetPasswordRule)
+PS C:\Users\Administrator> $Acl.AddAccessRule($UnlockAccountRule)
+```
+verify:
+```
+PS C:\Users\Administrator> $Acl.Access | Where-Object {$_.ObjectType -eq $ResetPasswordGuid -or $_.ObjectType -eq $LockoutTimeGuid} | Select-Object IdentityReference,ActiveDirectoryRights,AccessControlType,ObjectType,InheritanceType,InheritedObjectType | Format-List
+
+
+IdentityReference     : PSL\GG-PSL-User-Support
+ActiveDirectoryRights : ExtendedRight
+AccessControlType     : Allow
+ObjectType            : 00299570-246d-11d0-a768-00aa006e0529
+InheritanceType       : Descendents
+InheritedObjectType   : bf967aba-0de6-11d0-a285-00aa003049e2
+
+IdentityReference     : PSL\GG-PSL-User-Support
+ActiveDirectoryRights : WriteProperty
+AccessControlType     : Allow
+ObjectType            : 28630ebf-41d5-11d1-a9c1-0000f80367c1
+InheritanceType       : Descendents
+InheritedObjectType   : bf967aba-0de6-11d0-a285-00aa003049e2
+```
+
+capture the unchanged ACL for rollback:
+```
+PS C:\Users\Administrator> $OriginalAcl = Get-Acl -Path $TargetOU
+```
+commit the modified copy:
+```
+PS C:\Users\Administrator> Set-Acl -Path $TargetOU -AclObject $Acl
+```
+verify:
+```
+PS C:\Users\Administrator> (Get-Acl -Path $TargetOU).Access | Where-Object {$_.IdentityReference.Value -eq "PSL\GG-PSL-User-Support" -and ($_.ObjectType -eq $ResetPasswordGuid -or $_.ObjectType -eq $LockoutTimeGuid)} | Select-Object IdentityReference,ActiveDirectoryRights,AccessControlType,ObjectType,InheritanceType,InheritedObjectType | Format-List
+
+
+IdentityReference     : PSL\GG-PSL-User-Support
+ActiveDirectoryRights : WriteProperty
+AccessControlType     : Allow
+ObjectType            : 28630ebf-41d5-11d1-a9c1-0000f80367c1
+InheritanceType       : Descendents
+InheritedObjectType   : bf967aba-0de6-11d0-a285-00aa003049e2
+
+IdentityReference     : PSL\GG-PSL-User-Support
+ActiveDirectoryRights : ExtendedRight
+AccessControlType     : Allow
+ObjectType            : 00299570-246d-11d0-a768-00aa006e0529
+InheritanceType       : Descendents
+InheritedObjectType   : bf967aba-0de6-11d0-a285-00aa003049e2
+```
+
+test by setting `benjamin-admin`'s password variable AsSecureString:
+```
+PS C:\Users\Administrator> $BenjaminAdminPassword = Read-Host "Enter password for benjamin-admin" -AsSecureString
+Enter password for benjamin-admin:
+```
+
+when setting the password, active directory rejected this password because it did not meet the domain's length, complexity, or history requirements:
+```
+PS C:\Users\Administrator> Set-ADAccountPassword -Identity "benjamin-admin" -Reset -NewPassword $BenjaminAdminPassword
+Set-ADAccountPassword : The password does not meet the length, complexity, or history requirement of the domain.
+At line:1 char:1
++ Set-ADAccountPassword -Identity "benjamin-admin" -Reset -NewPassword  ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidData: (benjamin-admin:ADAccount) [Set-ADAccountPassword], ADPasswordComplexityExc
+   eption
+    + FullyQualifiedErrorId : ActiveDirectoryServer:1325,Microsoft.ActiveDirectory.Management.Commands.SetADAccountPas
+   sword
+```
+
+the password must:
+1. Meet the reported minimum length:
+```
+PS C:\Users\Administrator> Get-ADDefaultDomainPasswordPolicy -Identity "ad.pearsonspecterlitt.com" | Select-Object MinPasswordLength
+
+MinPasswordLength
+-----------------
+                7
+```
+
+2. Not contain the user's account name or parts of the user's full name that exceed two consecutive characters such as `Benjamin` or `Admin`.
+
+3. Have at least three of the four: an uppercase character, a lowercase character, a digit, and a symbol (nonalphanumeric).
+
+im going to use my python security toolkit to generate the password and store the password plaintext in my main pc desktop since it is not production.
+
+set `benjamin-admin`'s password variable AsSecureString again:
+```
+PS C:\Users\Administrator> $BenjaminAdminPassword = Read-Host "Enter password for benjamin-admin" -AsSecureString
+Enter password for benjamin-admin:
+```
+
+with the correct password complexity, setting the password will now run without error:
+```
+PS C:\Users\Administrator> Set-ADAccountPassword -Identity "benjamin-admin" -Reset -NewPassword $BenjaminAdminPassword
+```
+
+enable the account:
+```
+PS C:\Users\Administrator> Enable-ADAccount -Identity "benjamin-admin"
+```
+remove the password variable:
+```
+PS C:\Users\Administrator> Remove-Variable BenjaminAdminPassword
+```
+verify:
+```
+PS C:\Users\Administrator> Get-ADUser -Identity "benjamin-admin" -Properties PasswordLastSet | Select-Object SamAccountName,Enabled,PasswordLastSet
+
+SamAccountName Enabled PasswordLastSet
+-------------- ------- ---------------
+benjamin-admin    True 8/24/2026 11:55:18 AM
+```
+
+what's next:
+1. test whether `benjamin-admin` can reset one password inside `PSL-Users`
