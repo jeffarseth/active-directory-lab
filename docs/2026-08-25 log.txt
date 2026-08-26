@@ -1,0 +1,117 @@
+2026-08-25: Delegated user-support permission validation
+
+capture mross’s baseline before testing the delegated password reset:
+```
+PS C:\Users\Administrator> Get-ADUser -Identity "mross" -Properties PasswordLastSet | Select-Object SamAccountName,Enabled,PasswordLastSet,DistinguishedName
+
+SamAccountName Enabled PasswordLastSet DistinguishedName
+-------------- ------- --------------- -----------------
+mross            False                 CN=Mike Ross,OU=Legal,OU=PSL-Users,DC=ad,DC=pearsonspecterlitt,DC=com
+```
+
+attempt to capture benjamin-admin's credentials in memory:
+```
+PS C:\Users\Administrator> $BenjaminCredential = Get-Credential -UserName "PSL\benjamin-admin" -Message "Enter the password for benjamin-admin"
+```
+hmm... it should've returned an output.
+we can check whether a credential object was assigned at all:
+```
+PS C:\Users\Administrator> $null -eq $BenjaminCredential
+True
+```
+because the result is `True`, `$BenjaminCredential` contains no object.
+
+enter the password as a SecureString and manually construct the credential object:
+```
+PS C:\Users\Administrator> $BenjaminAdminPassword = Read-Host "Enter the password for PSL\benjamin-admin" -AsSecureString
+Enter the password for PSL\benjamin-admin:
+PS C:\Users\Administrator> $BenjaminCredential = [pscredential]::new("PSL\benjamin-admin",$BenjaminAdminPassword)
+```
+remove the password since it is no longer needed:
+```
+PS C:\Users\Administrator> Remove-Variable BenjaminAdminPassword
+```
+verify:
+```
+PS C:\Users\Administrator> [pscustomobject]@{Exists=$null -ne $BenjaminCredential;UserName=$BenjaminCredential.UserName}
+
+
+Exists UserName
+------ --------
+  True PSL\benjamin-admin
+```
+
+enter a test password variable for `mross`:
+```
+PS C:\Users\Administrator> $MrossTestPassword = Read-Host "Enter a new test password for mross" -AsSecureString
+Enter a new test password for mross:
+```
+
+set the test password for `mross`:
+```
+PS C:\Users\Administrator> Set-ADAccountPassword -Identity "mross" -Reset -NewPassword $MrossTestPassword -Credential $BenjaminCredential
+```
+remove the test password variable:
+```
+PS C:\Users\Administrator> Remove-Variable MrossTestPassword
+```
+verify:
+```
+PS C:\Users\Administrator> Get-ADUser -Identity "mross" -Properties PasswordLastSet | Select-Object SamAccountName,Enabled,PasswordLastSet,DistinguishedName
+
+SamAccountName Enabled PasswordLastSet      DistinguishedName
+-------------- ------- ---------------      -----------------
+mross            False 8/25/2026 7:20:00 PM CN=Mike Ross,OU=Legal,OU=PSL-Users,DC=ad,DC=pearsonspecterlitt,DC=com
+```
+timestamp indicates success.
+
+now to test the permission boundary. `benjamin-admin` only has password-reset and unlock rights, not permission to edit description.
+store first `mross`'s original description:
+```
+PS C:\Users\Administrator> $OriginalDescription = (Get-ADUser -Identity "mross" -Properties Description).Description
+```
+verify:
+```
+PS C:\Users\Administrator> [pscustomobject]@{SamAccountName="mross";OriginalDescription=$OriginalDescription}
+
+SamAccountName OriginalDescription
+-------------- -------------------
+mross
+```
+
+attempt to use `benjamin-admin` credentials to change `mross`'s description:
+```
+PS C:\Users\Administrator> Set-ADUser -Identity "mross" -Description "Delegation boundary test" -Credential $BenjaminCredential
+Set-ADUser : Insufficient access rights to perform the operation
+At line:1 char:1
++ Set-ADUser -Identity "mross" -Description "Delegation boundary test"  ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (mross:ADUser) [Set-ADUser], ADException
+    + FullyQualifiedErrorId : ActiveDirectoryServer:8344,Microsoft.ActiveDirectory.Management.Commands.SetADUser
+```
+error 8344 confirms that `benjamin-admin` lacks permission to modify the description. this demonstrates that the delegation is limited rather than general user administration.
+
+verify that the `mross`'s description remained unchanged:
+```
+PS C:\Users\Administrator> Get-ADUser -Identity "mross" -Properties Description | Select-Object SamAccountName,Description
+
+SamAccountName Description
+-------------- -----------
+mross
+```
+
+remove the remaining temporary variables:
+```
+PS C:\Users\Administrator> Remove-Variable -Name BenjaminCredential,OriginalDescription
+```
+verify:
+```
+PS C:\Users\Administrator> [pscustomobject]@{BenjaminCredentialExists=Test-Path Variable:\BenjaminCredential;OriginalDescriptionExists=Test-Path Variable:\OriginalDescription}
+
+BenjaminCredentialExists OriginalDescriptionExists
+------------------------ -------------------------
+                   False                     False
+```
+
+what's next:
+1. inspect the domain account-lockout policy and determine whether a safe unlock-permission test is possible
