@@ -1,0 +1,351 @@
+2026-08-27: Account lockout policy and delegated unlock validation
+
+vmware stale lock recovery:
+when starting `DC01`, vmware reported that the virtual machine was in use by another computer and that ownership recovery had failed.
+i ended the remaining `vmware.exe` process using task manager, opened the virtual machine directory containing `DC01.vmx`, and removed the stale `.lck` files. after relaunching vmware, `DC01` started normally.
+
+read the current domain lockout policy:
+```
+PS C:\Users\Administrator> Get-ADDefaultDomainPasswordPolicy -Identity "ad.pearsonspecterlitt.com" | Select-Object LockoutThreshold,LockoutDuration,LockoutObservationWindow | Format-List
+
+
+LockoutThreshold         : 0
+LockoutDuration          : 00:10:00
+LockoutObservationWindow : 00:10:00
+```
+these values show whether automatic account lockout is enabled, how long a lockout lasts, and when the failed-attempt counter resets. `LockoutThreshold` 0 means automatic lockout is currently disabled.
+
+check for fine-grained password policy:
+```
+PS C:\Users\Administrator> Get-ADFineGrainedPasswordPolicy -Filter * | Select-Object Name,Precedence,LockoutThreshold,LockoutDuration,LockoutObservationWindow,AppliesTo | Format-List
+```
+no fine-grained password policies are configured, so ordinary domain users follow the default domain policy.
+
+i will enable account lockout as a example domain security control using a threshold of 10 attempts, a 15-minute lockout duration, and a 15-minute observation window.
+
+store current lockout policy variables first for rollback:
+```
+PS C:\Users\Administrator> $OriginalLockoutPolicy = Get-ADDefaultDomainPasswordPolicy -Identity "ad.pearsonspecterlitt.com"
+```
+verify:
+```
+PS C:\Users\Administrator> $OriginalLockoutPolicy | Select-Object LockoutThreshold,LockoutDuration,LockoutObservationWindow | Format-List
+
+
+LockoutThreshold         : 0
+LockoutDuration          : 00:10:00
+LockoutObservationWindow : 00:10:00
+```
+
+verify the gpos linked at the domain root before changing the account-lockout policy:
+```
+PS C:\Users\Administrator> (Get-GPInheritance -Target "DC=ad,DC=pearsonspecterlitt,DC=com").GpoLinks | Select-Object DisplayName,Enabled,Enforced,Order | Format-Table -AutoSize
+
+DisplayName           Enabled Enforced Order
+-----------           ------- -------- -----
+Default Domain Policy    True    False     1
+```
+
+create a backup for the current gpo:
+```
+PS C:\Users\Administrator> $GpoBackupPath = "C:\GPO-Backups\2026-08-27-before-lockout-policy"
+PS C:\Users\Administrator> New-Item -ItemType Directory -Path $GpoBackupPath -Force
+
+
+    Directory: C:\GPO-Backups
+
+
+Mode                 LastWriteTime         Length Name
+----                 -------------         ------ ----
+d-----         8/27/2026   3:29 PM                2026-08-27-before-lockout-policy
+
+
+PS C:\Users\Administrator> Backup-GPO -Name "Default Domain Policy" -Path $GpoBackupPath
+
+
+DisplayName     : Default Domain Policy
+GpoId           : 31b2f340-016d-11d2-945f-00c04fb984f9
+Id              : bf544ddd-2023-40ac-bd31-5a9619170573
+BackupDirectory : C:\GPO-Backups\2026-08-27-before-lockout-policy
+CreationTime    : 8/27/2026 3:30:12 PM
+DomainName      : ad.pearsonspecterlitt.com
+Comment         :
+```
+
+set all three lockout policy values:
+```
+PS C:\Users\Administrator> Set-ADDefaultDomainPasswordPolicy -Identity "ad.pearsonspecterlitt.com" -LockoutThreshold 10 -LockoutDuration "00:15:00" -LockoutObservationWindow "00:15:00"
+```
+verify:
+```
+PS C:\Users\Administrator> gpupdate /force
+Updating policy...
+
+Computer Policy update has completed successfully.
+User Policy update has completed successfully.
+
+PS C:\Users\Administrator> Get-ADDefaultDomainPasswordPolicy -Identity "ad.pearsonspecterlitt.com" | Select-Object LockoutThreshold,LockoutDuration,LockoutObservationWindow | Format-List
+
+
+LockoutThreshold         : 10
+LockoutDuration          : 00:15:00
+LockoutObservationWindow : 00:15:00
+```
+automatic lockout is now active for ordinary domain users after ten failed attempts.
+
+list enabled users beneath `PSL-Users` to test:
+```
+PS C:\Users\Administrator> Get-ADUser -SearchBase "OU=PSL-Users,DC=ad,DC=pearsonspecterlitt,DC=com" -Filter 'Enabled -eq $true' -Properties LockedOut,AdminCount,PasswordLastSet | Select-Object SamAccountName,Name,Enabled,LockedOut,AdminCount,PasswordLastSet | Sort-Object SamAccountName | Format-Table -AutoSize
+```
+no enabled users were returned, so a selected employee account must be enabled for the test and restored afterward.
+
+im going to use katrina’s account and capture its state before selecting it as the lockout test target:
+```
+PS C:\Users\Administrator> Get-ADUser -Filter 'GivenName -eq "Katrina" -or Name -like "*Katrina*"' -Properties Enabled,LockedOut,AdminCount,PasswordLastSet | Select-Object SamAccountName,Name,Enabled,LockedOut,AdminCount,PasswordLastSet,DistinguishedName | Format-List
+
+
+SamAccountName    : kbennett
+Name              : Katrina Bennett
+Enabled           : False
+LockedOut         : False
+AdminCount        :
+PasswordLastSet   :
+DistinguishedName : CN=Katrina Bennett,OU=Legal,OU=PSL-Users,DC=ad,DC=pearsonspecterlitt,DC=com
+```
+
+verify `kbennett`'s group memberships that she isn't admin:
+```
+PS C:\Users\Administrator> Get-ADPrincipalGroupMembership -Identity "kbennett" | Select-Object Name,GroupScope,GroupCategory | Sort-Object Name | Format-Table -AutoSize
+
+Name         GroupScope GroupCategory
+----         ---------- -------------
+Domain Users     Global      Security
+```
+
+enter a test password variable for `kbennett`:
+```
+PS C:\Users\Administrator> $KbennettTestPassword = Read-Host "Enter a new test password for kbennett" -AsSecureString
+Enter a new test password for kbennett:
+```
+
+set the test password for `kbennett`:
+```
+PS C:\Users\Administrator> Set-ADAccountPassword -Identity "kbennett" -Reset -NewPassword $KbennettTestPassword
+```
+
+remove the test password variable:
+```
+PS C:\Users\Administrator> Remove-Variable KbennettTestPassword
+```
+
+enable `kbennett`:
+```
+PS C:\Users\Administrator> Enable-ADAccount -Identity "kbennett"
+```
+
+capture `kbennett`'s lockout baseline before generating failed authentication attempts:
+```
+PS C:\Users\Administrator> Get-ADUser -Identity "kbennett" -Properties Enabled,LockedOut,badPwdCount,LastBadPasswordAttempt | Select-Object SamAccountName,Enabled,LockedOut,badPwdCount,LastBadPasswordAttempt | Format-List
+
+
+SamAccountName         : kbennett
+Enabled                : True
+LockedOut              : False
+badPwdCount            : 0
+LastBadPasswordAttempt :
+```
+
+enter an intentionally incorrect password variable for `kbennett`:
+```
+PS C:\Users\Administrator> $KbennettWrongPassword = Read-Host "Enter an intentionally incorrect password for kbennett" -AsSecureString
+Enter an intentionally incorrect password for kbennett:
+```
+
+create an incorrect credential object for `kbennett`:
+```
+PS C:\Users\Administrator> $KbennettWrongCredential = [pscredential]::new("PSL\kbennett",$KbennettWrongPassword)
+```
+
+remove the separate incorrect password variable:
+```
+PS C:\Users\Administrator> Remove-Variable KbennettWrongPassword
+```
+verify:
+```
+PS C:\Users\Administrator> [pscustomobject]@{Exists=$null -ne $KbennettWrongCredential;UserName=$KbennettWrongCredential.UserName}
+
+Exists UserName
+------ --------
+  True PSL\kbennett
+```
+
+perform one authentication attempt using `kbennett`'s incorrect credential object:
+```
+PS C:\Users\Administrator> Get-ADUser -Identity "kbennett" -Credential $KbennettWrongCredential -Server "DC01.ad.pearsonspecterlitt.com" -ErrorAction Stop
+Get-ADUser : Either the target name is incorrect or the server has rejected the client credentials.
+At line:1 char:1
++ Get-ADUser -Identity "kbennett" -Credential $KbennettWrongCredential  ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : SecurityError: (kbennett:ADUser) [Get-ADUser], AuthenticationException
+    + FullyQualifiedErrorId : ActiveDirectoryCmdlet:System.Security.Authentication.AuthenticationException,Microsoft.A
+   ctiveDirectory.Management.Commands.GetADUser
+```
+
+check whether the failed authentication was counted:
+```
+PS C:\Users\Administrator> Get-ADUser -Identity "kbennett" -Server "DC01.ad.pearsonspecterlitt.com" -Properties LockedOut,badPwdCount,LastBadPasswordAttempt | Select-Object SamAccountName,LockedOut,badPwdCount,LastBadPasswordAttempt | Format-List
+
+
+SamAccountName         : kbennett
+LockedOut              : False
+badPwdCount            : 1
+LastBadPasswordAttempt : 8/27/2026 4:17:18 PM
+```
+
+perform a controlled batch of additional failed authentication attempts:
+```
+PS C:\Users\Administrator> 2..9 | ForEach-Object { Get-ADUser -Identity "kbennett" -Credential $KbennettWrongCredential -Server "DC01.ad.pearsonspecterlitt.com" -ErrorAction SilentlyContinue | Out-Null; "failed authentication attempt $_ of 10 completed" }
+```
+verify:
+```
+PS C:\Users\Administrator> Get-ADUser -Identity "kbennett" -Server "DC01.ad.pearsonspecterlitt.com" -Properties LockedOut,badPwdCount,LastBadPasswordAttempt | Select-Object SamAccountName,LockedOut,badPwdCount,LastBadPasswordAttempt | Format-List
+
+
+SamAccountName         : kbennett
+LockedOut              : True
+badPwdCount            : 10
+LastBadPasswordAttempt : 8/27/2026 4:20:03 PM
+```
+
+remove the incorrect credential:
+```
+PS C:\Users\Administrator> Remove-Variable KbennettWrongCredential
+```
+
+recreate `benjamin-admin`'s credential object:
+```
+PS C:\Users\Administrator> $BenjaminAdminPassword = Read-Host "Enter the password for benjamin-admin" -AsSecureString
+Enter the password for benjamin-admin:
+PS C:\Users\Administrator> $BenjaminCredential = [pscredential]::new("PSL\benjamin-admin",$BenjaminAdminPassword)
+PS C:\Users\Administrator> Remove-Variable BenjaminAdminPassword
+```
+
+run the delegated unlock:
+```
+PS C:\Users\Administrator> Unlock-ADAccount -Identity "kbennett" -Credential $BenjaminCredential -Server "DC01.ad.pearsonspecterlitt.com"
+```
+verify:
+```
+PS C:\Users\Administrator> Get-ADUser -Identity "kbennett" -Server "DC01.ad.pearsonspecterlitt.com" -Properties Enabled,LockedOut,badPwdCount,LastBadPasswordAttempt | Select-Object SamAccountName,Enabled,LockedOut,badPwdCount,LastBadPasswordAttempt | Format-List
+
+
+SamAccountName         : kbennett
+Enabled                : True
+LockedOut              : False
+badPwdCount            : 0
+LastBadPasswordAttempt : 8/27/2026 4:20:03 PM
+```
+
+recreate `kbennett`'s credential object using the correct password:
+```
+PS C:\Users\Administrator> $KbennettTestPassword = Read-Host "Enter the password for kbennett" -AsSecureString
+Enter the password for kbennett:
+PS C:\Users\Administrator> $KbennettCredential = [pscredential]::new("PSL\kbennett",$KbennettTestPassword)
+PS C:\Users\Administrator> Remove-Variable KbennettTestPassword
+```
+
+test successful authentication after the unlock:
+```
+PS C:\Users\Administrator> Get-ADUser -Identity "kbennett" -Credential $KbennettCredential -Server "DC01.ad.pearsonspecterlitt.com" -Properties Enabled -ErrorAction Stop | Select-Object SamAccountName,Enabled,DistinguishedName
+
+SamAccountName Enabled DistinguishedName
+-------------- ------- -----------------
+kbennett          True CN=Katrina Bennett,OU=Legal,OU=PSL-Users,DC=ad,DC=pearsonspecterlitt,DC=com
+```
+
+time for cleanup...
+
+remove the remaining credential objects:
+```
+PS C:\Users\Administrator> Remove-Variable -Name KbennettCredential,BenjaminCredential
+```
+
+restore `kbennett`'s original disabled state:
+```
+PS C:\Users\Administrator> Disable-ADAccount -Identity "kbennett"
+```
+verify:
+```
+PS C:\Users\Administrator> Get-ADUser -Identity "kbennett" -Properties Enabled,LockedOut,PasswordLastSet | Select-Object SamAccountName,Enabled,LockedOut,PasswordLastSet,DistinguishedName | Format-List
+
+
+SamAccountName    : kbennett
+Enabled           : False
+LockedOut         : False
+PasswordLastSet   : 8/27/2026 4:09:33 PM
+DistinguishedName : CN=Katrina Bennett,OU=Legal,OU=PSL-Users,DC=ad,DC=pearsonspecterlitt,DC=com
+```
+kbennett was restored to a disabled and unlocked state, but unlike the initial baseline, the account retains its test password for future lab use.
+
+verify credential-variable cleanup:
+```
+PS C:\Users\Administrator> [pscustomobject]@{KbennettCredentialExists=Test-Path Variable:\KbennettCredential;BenjaminCredentialExists=Test-Path Variable:\BenjaminCredential;KbennettWrongCredentialExists=Test-Path Variable:\KbennettWrongCredential;KbennettTestPasswordExists=Test-Path Variable:\KbennettTestPassword;KbennettWrongPasswordExists=Test-Path Variable:\KbennettWrongPassword;BenjaminAdminPasswordExists=Test-Path Variable:\BenjaminAdminPassword} | Format-List
+
+
+KbennettCredentialExists      : False
+BenjaminCredentialExists      : False
+KbennettWrongCredentialExists : False
+KbennettTestPasswordExists    : False
+KbennettWrongPasswordExists   : False
+BenjaminAdminPasswordExists   : False
+```
+
+collect audit evidence from event viewer:
+```
+event 4740 @ 16:20
+A user account was locked out.
+
+Subject:
+	Security ID:		SYSTEM
+	Account Name:		DC01$
+	Account Domain:		PSL
+	Logon ID:		0x3E7
+
+Account That Was Locked Out:
+	Security ID:		PSL\kbennett
+	Account Name:		kbennett
+
+Additional Information:
+	Caller Computer Name:	DC01
+```
+```
+event 4767 @ 16:24
+A user account was unlocked.
+
+Subject:
+	Security ID:		PSL\benjamin-admin
+	Account Name:		benjamin-admin
+	Account Domain:		PSL
+	Logon ID:		0x5A4D89
+
+Target Account:
+	Security ID:		PSL\kbennett
+	Account Name:		kbennett
+	Account Domain:		PSL
+```
+
+remove the remaining session variables:
+```
+PS C:\Users\Administrator> Remove-Variable -Name OriginalLockoutPolicy,GpoBackupPath
+```
+verify:
+```
+PS C:\Users\Administrator> [pscustomobject]@{OriginalLockoutPolicyExists=Test-Path Variable:\OriginalLockoutPolicy;GpoBackupPathExists=Test-Path Variable:\GpoBackupPath} | Format-List
+
+
+OriginalLockoutPolicyExists : False
+GpoBackupPathExists         : False
+```
+
+what's next:
+1. begin the endpoint build phase with WS01. WS02 and the Kali attacker box will follow before attack testing
