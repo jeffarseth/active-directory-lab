@@ -1,0 +1,61 @@
+2026-08-28: WS01, WS02, and Kali virtual machine deployment
+
+downloaded windows 11 iso from microsoft
+sha256: 7B052573BA7894C9924E3E87BA732CCD354D18CB75A883EFA9B900EA125BFD51
+
+downloaded kali linux iso from kali
+sha256: 6dbefacc95e3b556c19c48e8bae39b8b505e2d3a1aba0bfb7ab62b036c3d2ba3
+
+create `WS01`:
+Hardware - Workstation 25H2 or later
+Installer disc - I will install the operating system later
+Guest OS - Microsoft Windows, Windows 11 x64
+Name - WS01
+Firmware - UEFI, Secure Boot enabled
+Encryption - required for virtual TPM; password not logged
+Trusted Platform Module - TPM 2.0
+Processors - 2, 1 core each
+Memory - 4096MB
+Network - NAT
+I/O controller type - LSI Logic SAS
+Virtual disk type - NVMe
+Max disk size - 80GB, single file
+select VM settings for CD/DVD to the Windows 11 ISO, connect at power on
+
+create `WS02`:
+Hardware - Workstation 25H2 or later
+Installer disc - I will install the operating system later
+Guest OS - Microsoft Windows, Windows 11 x64
+Name - WS02
+Firmware - UEFI, Secure Boot enabled
+Encryption - required for virtual TPM; password not logged
+Trusted Platform Module - TPM 2.0
+Processors - 2, 1 core each
+Memory - 4096MB
+Network - NAT
+I/O controller type - LSI Logic SAS
+Virtual disk type - NVMe
+Max disk size - 80GB, single file
+select VM settings for CD/DVD to the Windows 11 ISO, connect at power on
+
+create `KALI01`:
+Hardware - Workstation 25H2 or later
+Installer disc - I will install the operating system later
+Guest OS - Linux, latest available Debian 64-bit
+Name - KALI01
+Firmware - UEFI, Secure Boot disabled
+Trusted Platform Module - none
+Processors - 2, 1 core each
+Memory - 4096MB
+Network - NAT
+I/O controller type - LSI Logic
+Virtual disk type - SCSI
+Max disk size - 60GB, single file
+Accelerated 3D graphics - disabled
+select VM settings for CD/DVD to the Kali installer ISO, connect at power on
+Full name: Jerry
+Username: jerry
+Domain name: blank
+
+what's next:
+1. begin endpoint integration by installing and validating guest tools on WS01, WS02, and Kali.
