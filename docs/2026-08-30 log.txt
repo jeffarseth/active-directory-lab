@@ -1,0 +1,222 @@
+2026-08-30: WS01 and WS02 domain integration
+
+before domain joining both workstations to `DC01`, i am going to check `DC01`'s static ipv4 address that was configured in earlier logs, verify the target ou, and verify no computer objects have been made yet.
+
+verify the domain controller's identity and IPv4 address:
+```
+PS C:\Users\Administrator> Get-ADDomainController -Identity "DC01" -Server "DC01.ad.pearsonspecterlitt.com" | Select-Object HostName,Domain,IPv4Address,Site,IsGlobalCatalog | Format-List
+
+
+HostName        : DC01.ad.pearsonspecterlitt.com
+Domain          : ad.pearsonspecterlitt.com
+IPv4Address     : 192.168.208.10
+Site            : Default-First-Site-Name
+IsGlobalCatalog : True
+```
+
+verify that the workstation ou exist:
+```
+PS C:\Users\Administrator> Get-ADOrganizationalUnit -Identity "OU=Workstations,DC=ad,DC=pearsonspecterlitt,DC=com" | Select-Object Name,DistinguishedName
+
+Name         DistinguishedName
+----         -----------------
+Workstations OU=Workstations,DC=ad,DC=pearsonspecterlitt,DC=com
+```
+
+verify that `WS01` or `WS02` computer objects do not exist yet:
+```
+PS C:\Users\Administrator> Get-ADComputer -Filter 'Name -eq "WS01" -or Name -eq "WS02"' | Select-Object Name,Enabled,DistinguishedName
+```
+
+`DC01` is reachable at `192.168.208.10`, the `Workstations` ou exists, and no `WS01` or `WS02` computer objects exist.
+
+confirm `DC01` network adapter and its dns:
+```
+PS C:\Users\Administrator> Get-NetIPConfiguration | Where-Object {$_.NetAdapter.Status -eq "Up"} | Select-Object InterfaceAlias,InterfaceIndex,@{Name="IPv4Address";Expression={$_.IPv4Address.IPAddress}},@{Name="DNSServers";Expression={$_.DNSServer.ServerAddresses}} | Format-List
+
+
+InterfaceAlias : Ethernet0
+InterfaceIndex : 6
+IPv4Address    : 192.168.208.10
+DNSServers     : 192.168.208.10
+```
+
+i will now proceed to use `WS01`.
+
+verify `WS01`'s computer name and domain:
+```WS01
+PS C:\WINDOWS\system32> Get-CimInstance Win32_ComputerSystem | Select-Object Name,Domain,PartOfDomain
+
+Name            Domain    PartOfDomain
+----            ------    ------------
+DESKTOP-6OSRKHA WORKGROUP        False
+```
+this confirms the workstation retains its automatically generated Windows name, remains in `WORKGROUP`, and is not domain-joined. It must be renamed to `WS01` before or during the domain-join operation.
+we can combine the rename and a possible domain join later to avoid an unnecessary reboot.
+
+check `WS01`'s active network configuration:
+```WS01
+PS C:\WINDOWS\system32> Get-NetIPConfiguration | Where-Object {$_.NetAdapter.Status -eq "Up"} | Select-Object InterfaceAlias,InterfaceIndex,@{Name="IPv4Address";Expression={$_.IPv4Address.IPAddress}},@{Name="DNSServers";Expression={$_.DNSServer.ServerAddresses}} | Format-List
+
+
+InterfaceAlias : Ethernet0
+InterfaceIndex : 6
+IPv4Address    : 192.168.208.129
+DNSServers     : 192.168.208.2
+```
+`WS01` received an address on the same vmware nat network as `DC01`, but it currently uses vmware's dns server.
+active directory depends on dns service records hosted by `DC01`, so the workstation's dns server must be changed to `192.168.208.10` before domain discovery and joining.
+
+change dns server on interface 6:
+```WS01
+PS C:\WINDOWS\system32> Set-DnsClientServerAddress -InterfaceIndex 6 -ServerAddresses "192.168.208.10"
+```
+verify:
+```WS01
+PS C:\WINDOWS\system32> Get-NetIPConfiguration | Where-Object {$_.NetAdapter.Status -eq "Up"} | Select-Object InterfaceAlias,InterfaceIndex,@{Name="IPv4Address";Expression={$_.IPv4Address.IPAddress}},@{Name="DNSServers";Expression={$_.DNSServer.ServerAddresses}} | Format-List
+
+
+InterfaceAlias : Ethernet0
+InterfaceIndex : 6
+IPv4Address    : 192.168.208.129
+DNSServers     : 192.168.208.10
+```
+
+confirm that `WS01` dns identifies `DC01` as the domain's directory-service provider:
+``` WS01
+PS C:\WINDOWS\system32> Resolve-DnsName -Name "_ldap._tcp.dc._msdcs.ad.pearsonspecterlitt.com" -Type SRV
+
+Name                                     Type   TTL   Section    NameTarget                     Priority Weight Port
+----                                     ----   ---   -------    ----------                     -------- ------ ----
+_ldap._tcp.dc._msdcs.ad.pearsonspecterli SRV    600   Answer     dc01.ad.pearsonspecterlitt.com 0        100    389
+tt.com
+
+Name       : dc01.ad.pearsonspecterlitt.com
+QueryType  : A
+TTL        : 3600
+Section    : Additional
+IP4Address : 192.168.208.10
+```
+the srv record identifies `dc01.ad.pearsonspecterlitt.com` as the domain controller providing ldap on port 389, and the accompanying `A` record resolves `DC01` to `192.168.208.10`.
+this confirms that `WS01` can discover the active directory domain through dns.
+
+prepare the domain credential:
+```WS01
+PS C:\WINDOWS\system32> $DomainJoinCredential = Get-Credential -UserName "PSL\Administrator" -Message "Enter the password for Administrator"
+```
+this prompts powershell credential request.
+
+to combine it into one reboot, rename and domain join will be combined into one operation:
+```WS01
+PS C:\WINDOWS\system32> Add-Computer -DomainName "ad.pearsonspecterlitt.com" -Server "DC01.ad.pearsonspecterlitt.com" -OUPath "OU=Workstations,DC=ad,DC=pearsonspecterlitt,DC=com" -NewName "WS01" -Credential $DomainJoinCredential -PassThru -Verbose
+VERBOSE: Performing the operation "Join in domain 'ad.pearsonspecterlitt.com\DC01.ad.pearsonspecterlitt.com'" on target
+ "DESKTOP-6OSRKHA".
+Add-Computer : Computer 'DESKTOP-6OSRKHA' failed to join domain
+'ad.pearsonspecterlitt.com\DC01.ad.pearsonspecterlitt.com' from its current workgroup 'WORKGROUP' with following error
+message: Access is denied.
+At line:1 char:1
++ Add-Computer -DomainName "ad.pearsonspecterlitt.com" -Server "DC01.ad ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : OperationStopped: (DESKTOP-6OSRKHA:String) [Add-Computer], InvalidOperationException
+    + FullyQualifiedErrorId : FailToJoinDomainFromWorkgroup,Microsoft.PowerShell.Commands.AddComputerCommand
+
+
+HasSucceeded ComputerName
+------------ ------------
+False        DESKTOP-6OSRKHA
+```
+when i ran the command, it errors to access denied even though i put the correct password for `PSL\Administrator`.
+the domain join attempt failed before making any changes because powerShell was not elevated. membership in the local administrators group does not automatically elevate each process due to user account control.
+
+run powershell as administrator, enter the domain credential again, then try to domain join again:
+```WS01
+PS C:\WINDOWS\system32> $DomainJoinCredential = Get-Credential -UserName "PSL\Administrator" -Message "Enter the password for Administrator"
+PS C:\WINDOWS\system32> Add-Computer -DomainName "ad.pearsonspecterlitt.com" -Server "DC01.ad.pearsonspecterlitt.com" -OUPath "OU=Workstations,DC=ad,DC=pearsonspecterlitt,DC=com" -NewName "WS01" -Credential $DomainJoinCredential -PassThru -Verbose
+VERBOSE: Performing the operation "Join in domain 'ad.pearsonspecterlitt.com\DC01.ad.pearsonspecterlitt.com'" on target
+ "DESKTOP-6OSRKHA".
+
+HasSucceeded ComputerName
+------------ ------------
+True         DESKTOP-6OSRKHA
+WARNING: The changes will take effect after you restart the computer DESKTOP-6OSRKHA.
+```
+
+destroy the domain credential in-memory:
+```WS01
+PS C:\WINDOWS\system32> Remove-Variable DomainJoinCredential
+```
+verify:
+```WS01
+PS C:\WINDOWS\system32> Test-Path Variable:\DomainJoinCredential
+False
+```
+
+restart computer for changes to take effect:
+```WS01
+PS C:\WINDOWS\system32> Restart-Computer
+```
+
+verify changes:
+```WS01
+PS C:\WINDOWS\system32> Get-CimInstance Win32_ComputerSystem | Select-Object Name,Domain,PartOfDomain
+
+Name Domain                    PartOfDomain
+---- ------                    ------------
+WS01 ad.pearsonspecterlitt.com         True
+```
+
+test the secure channel between `WS01` and `DC01`:
+```WS01
+PS C:\WINDOWS\system32> Test-ComputerSecureChannel -Server "DC01.ad.pearsonspecterlitt.com" -Verbose
+VERBOSE: Performing the operation "Test-ComputerSecureChannel" on target "WS01".
+True
+VERBOSE: The secure channel between the local computer and the domain ad.pearsonspecterlitt.com is in good condition
+```
+
+verify `WS01`'s computer object in `DC01`'s active directory:
+```
+PS C:\Users\Administrator> Get-ADComputer -Identity "WS01" -Server "DC01.ad.pearsonspecterlitt.com" -Properties DNSHostName,OperatingSystem,Enabled | Select-Object Name,Enabled,DNSHostName,OperatingSystem,DistinguishedName | Format-List
+
+
+Name              : WS01
+Enabled           : True
+DNSHostName       : WS01.ad.pearsonspecterlitt.com
+OperatingSystem   : Windows 11 Pro
+DistinguishedName : CN=WS01,OU=Workstations,DC=ad,DC=pearsonspecterlitt,DC=com
+```
+
+now we are doing it again for `WS02`...
+
+verify changes:
+```WS02
+PS C:\WINDOWS\system32> Get-CimInstance Win32_ComputerSystem | Select-Object Name,Domain,PartOfDomain
+
+Name Domain                    PartOfDomain
+---- ------                    ------------
+WS02 ad.pearsonspecterlitt.com         True
+```
+
+test the secure channel between `WS01` and `DC01`:
+```WS02
+PS C:\WINDOWS\system32> Test-ComputerSecureChannel -Server "DC01.ad.pearsonspecterlitt.com" -Verbose
+VERBOSE: Performing the operation "Test-ComputerSecureChannel" on target "WS02".
+True
+VERBOSE: The secure channel between the local computer and the domain ad.pearsonspecterlitt.com is in good condition
+```
+
+verify `WS02`'s computer object:
+```
+PS C:\Users\Administrator> Get-ADComputer -Identity "WS02" -Server "DC01.ad.pearsonspecterlitt.com" -Properties DNSHostName,OperatingSystem,Enabled | Select-Object Name,Enabled,DNSHostName,OperatingSystem,DistinguishedName | Format-List
+
+
+Name              : WS02
+Enabled           : True
+DNSHostName       : WS02.ad.pearsonspecterlitt.com
+OperatingSystem   : Windows 11 Pro
+DistinguishedName : CN=WS02,OU=Workstations,DC=ad,DC=pearsonspecterlitt,DC=com
+```
+
+`WS01` and `WS02` are now correctly named, joined to `ad.pearsonspecterlitt.com`, represented by enabled computer accounts in the `Workstations` ou, and maintaining healthy secure channels with `DC01`.
+
+what's next:
+1. create clean post-domain-join vmware snapshots of `WS01` and `WS02` before domain-user and group policy testing
