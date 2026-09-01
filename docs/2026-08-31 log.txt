@@ -1,0 +1,102 @@
+2026-08-31: Workstation snapshots and domain-user validation
+
+take a snapshot of `WS01` and `WS02` for clean recovery checkpoints before eventually introducing vulnerabilities.
+
+verify on vmware.
+
+before testing domain-user sign-in, identify an enabled ordinary user beneath `PSL-Users`:
+```
+PS C:\Users\Administrator> Get-ADUser -Filter 'Enabled -eq $true' -SearchBase "OU=PSL-Users,DC=ad,DC=pearsonspecterlitt,DC=com" -Server "DC01.ad.pearsonspecterlitt.com" -Properties DisplayName,Department | Select-Object SamAccountName,DisplayName,Department,DistinguishedName
+```
+all user accounts beneath `PSL-Users` are currently disabled.
+
+enable `kbennett` for domain-user testing:
+```
+PS C:\Users\Administrator> Enable-ADAccount -Identity "kbennett" -Server "DC01.ad.pearsonspecterlitt.com"
+```
+
+verify that `kbennett` is enabled and unlocked:
+```
+PS C:\Users\Administrator> Get-ADUser -Identity "kbennett" -Server "DC01.ad.pearsonspecterlitt.com" -Properties Enabled,LockedOut,PasswordLastSet | Select-Object SamAccountName,Enabled,LockedOut,PasswordLastSet,DistinguishedName | Format-List
+
+
+SamAccountName    : kbennett
+Enabled           : True
+LockedOut         : False
+PasswordLastSet   : 8/27/2026 4:09:33 PM
+DistinguishedName : CN=Katrina Bennett,OU=Legal,OU=PSL-Users,DC=ad,DC=pearsonspecterlitt,DC=com
+```
+
+`WS01` becomes the test workstation, while `WS02` remains an unchanged domain-joined control for comparison.
+
+sign in as `kbennett` on `WS01`. let windows create her profile.
+
+verify the ordinary domain-user session on `WS01`:
+```WS01
+PS C:\Users\kbennett> [pscustomobject]@{Identity=(whoami);ComputerName=$env:COMPUTERNAME;UserDomain=$env:USERDOMAIN;LogonServer=$env:LOGONSERVER} | Format-List
+
+
+Identity     : psl\kbennett
+ComputerName : WS01
+UserDomain   : PSL
+LogonServer  : \\DC01
+```
+
+check which group policies were applied to `kbennett` on `WS01`:
+```WS01
+PS C:\Users\kbennett> gpresult /Scope User /R
+
+Microsoft (R) Windows (R) Operating System Group Policy Result tool v2.0
+© Microsoft Corporation. All rights reserved.
+
+Created on ‎8/‎31/‎2026 at 4:39:45 PM
+
+
+RSOP data for PSL\kbennett on WS01 : Logging Mode
+--------------------------------------------------
+
+OS Configuration:            Member Workstation
+OS Version:                  10.0.26200
+Site Name:                   N/A
+Roaming Profile:             N/A
+Local Profile:               C:\Users\kbennett
+Connected over a slow link?: No
+
+
+USER SETTINGS
+--------------
+    CN=Katrina Bennett,OU=Legal,OU=PSL-Users,DC=ad,DC=pearsonspecterlitt,DC=com
+    Last time Group Policy was applied: 8/31/2026 at 4:23:55 PM
+    Group Policy was applied from:      DC01.ad.pearsonspecterlitt.com
+    Group Policy slow link threshold:   500 kbps
+    Domain Name:                        PSL
+    Domain Type:                        Windows 2008 or later
+
+    Applied Group Policy Objects
+    -----------------------------
+        N/A
+
+    The following GPOs were not applied because they were filtered out
+    -------------------------------------------------------------------
+        Local Group Policy
+            Filtering:  Not Applied (Empty)
+
+    The user is a part of the following security groups
+    ---------------------------------------------------
+        Domain Users
+        Everyone
+        BUILTIN\Users
+        NT AUTHORITY\INTERACTIVE
+        CONSOLE LOGON
+        NT AUTHORITY\Authenticated Users
+        This Organization
+        LOCAL
+        Authentication authority asserted identity
+        Medium Mandatory Level
+```
+this confirms that `kbennett` signed in as an ordinary, non-elevated domain user and that `WS01` successfully processed group policy through `DC01`.
+
+`kbennett` remains enabled and unlocked for later lab scenarios.
+
+what's next:
+1. prepare `KALI01` and transition the lab to an isolated host-only attack environment before beginning the first controlled exploitation scenario
