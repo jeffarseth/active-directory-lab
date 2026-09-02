@@ -1,0 +1,226 @@
+2026-09-01: Kali baseline and isolated attack-network preparation
+
+verify hostname on `KALI01`:
+```KALI01
+┌──(jerry㉿kali)-[~]
+└─$ hostnamectl --static
+kali
+```
+
+inspect Kali's local hostname record before renaming it:
+```KALI01
+┌──(jerry㉿kali)-[/etc]
+└─$ cat hosts 
+127.0.0.1       localhost
+127.0.1.1       kali
+
+# The following lines are desirable for IPv6 capable hosts
+::1     localhost ip6-localhost ip6-loopback
+ff02::1 ip6-allnodes
+ff02::2 ip6-allrouters
+```
+
+rename it to `kali01`:
+```KALI01
+┌──(jerry㉿kali)-[~]
+└─$ sudo hostnamectl set-hostname kali01
+[sudo] password for jerry: 
+                                                                                                    
+┌──(jerry㉿kali)-[~]
+└─$ hostnamectl --static                
+kali01
+```
+
+edit line `127.0.1.1` from `kali` to `kali01`:
+```KALI01
+┌──(jerry㉿kali)-[~]
+└─$ sudo nano /etc/hosts
+```
+verify:
+```KALI01
+┌──(jerry㉿kali01)-[~]
+└─$ cat /etc/hosts                 
+127.0.0.1       localhost
+127.0.1.1       kali01
+
+# The following lines are desirable for IPv6 capable hosts
+::1     localhost ip6-localhost ip6-loopback
+ff02::1 ip6-allnodes
+ff02::2 ip6-allrouters
+```
+
+display `KALI01`’s network interfaces and their ipv4 addresses:
+```KALI01
+┌──(jerry㉿kali01)-[~]
+└─$ ip -brief -4 address
+lo               UNKNOWN        127.0.0.1/8 
+eth0             UP             192.168.208.130/24
+```
+`KALI01` currently resides on the same `192.168.208.0/24` vmware nat network as the domain machines:
+DC01: 192.168.208.10
+WS01: 192.168.208.129
+WS02: 192.168.208.131
+
+display `KALI01`’s routing table and identify its default gateway (a.k.a. internet access):
+```KALI01
+┌──(jerry㉿kali01)-[~]
+└─$ ip route            
+default via 192.168.208.2 dev eth0 proto dhcp src 192.168.208.130 metric 100 
+192.168.208.0/24 dev eth0 proto kernel scope link src 192.168.208.130 metric 100
+```
+
+poweroff and take a snapshot `KALI01` for a clean recovery checkpoint.
+
+verify on vmware.
+
+all four vms currently use `VMnet8` under the subnet `192.168.208.0/24`. `192.168.208.2` is the vmware nat gateway for all.
+in order to isolate it into host-only (no internet access and private), we have to get it into `VMNet1` under the subnet `192.168.190.0/24`
+
+check host machine's `VMnet1` ipv4:
+```
+PS C:\Windows\system32> Get-NetIPAddress -InterfaceAlias "VMware Network Adapter VMnet1" -AddressFamily IPv4 | Select-Object InterfaceAlias,IPAddress,PrefixLength
+
+InterfaceAlias                IPAddress     PrefixLength
+--------------                ---------     ------------
+VMware Network Adapter VMnet1 192.168.190.1           24
+```
+windows host uses `192.168.190.1`.
+the planned static addresses are `192.168.190.10` for `DC01` and `192.168.190.11` for `KALI01` are outside both the host address and vmware dhcp pool. `WS01` and `WS02` will use dhcp.
+
+change all vm network adapter to host-only.
+power on `DC01` only.
+
+display `DC01`'s adapter, old ip, old nat gateway, and old dns address:
+```
+PS C:\Users\Administrator> Get-NetIPConfiguration | Where-Object {$_.NetAdapter.Status -eq "Up"} | Select-Object InterfaceAlias,InterfaceIndex,@{Name="IPv4Address";Expression={$_.IPv4Address.IPAddress}},@{Name="PrefixLength";Expression={$_.IPv4Address.PrefixLength}},@{Name="DefaultGateway";Expression={$_.IPv4DefaultGateway.NextHop}},@{Name="DNSServers";Expression={$_.DNSServer.ServerAddresses}} | Format-List
+
+
+InterfaceAlias : Ethernet0
+InterfaceIndex : 6
+IPv4Address    : 192.168.208.10
+PrefixLength   : 24
+DefaultGateway : 192.168.208.2
+DNSServers     : 192.168.208.10
+```
+
+remove nat exit:
+```
+PS C:\Users\Administrator> Remove-NetRoute -InterfaceIndex 6 -DestinationPrefix "0.0.0.0/0" -NextHop "192.168.208.2" -Confirm:$false
+```
+
+add `DC01`'s new address:
+```
+PS C:\Users\Administrator> New-NetIPAddress -InterfaceIndex 6 -IPAddress "192.168.190.10" -PrefixLength 24
+
+
+IPAddress         : 192.168.190.10
+InterfaceIndex    : 6
+InterfaceAlias    : Ethernet0
+AddressFamily     : IPv4
+Type              : Unicast
+PrefixLength      : 24
+PrefixOrigin      : Manual
+SuffixOrigin      : Manual
+AddressState      : Tentative
+ValidLifetime     :
+PreferredLifetime :
+SkipAsSource      : False
+PolicyStore       : ActiveStore
+
+IPAddress         : 192.168.190.10
+InterfaceIndex    : 6
+InterfaceAlias    : Ethernet0
+AddressFamily     : IPv4
+Type              : Unicast
+PrefixLength      : 24
+PrefixOrigin      : Manual
+SuffixOrigin      : Manual
+AddressState      : Invalid
+ValidLifetime     :
+PreferredLifetime :
+SkipAsSource      : False
+PolicyStore       : PersistentStore
+```
+verify live state:
+```
+PS C:\Users\Administrator> Get-NetIPAddress -InterfaceIndex 6 -AddressFamily IPv4 -PolicyStore ActiveStore | Select-Object IPAddress,PrefixLength,AddressState,SkipAsSource | Format-Table -AutoSize
+
+IPAddress      PrefixLength AddressState SkipAsSource
+---------      ------------ ------------ ------------
+192.168.208.10           24    Preferred        False
+192.168.190.10           24    Preferred        False
+```
+both addresses are active.
+
+make `DC01` use its new address for dns:
+```
+PS C:\Users\Administrator> Set-DnsClientServerAddress -InterfaceIndex 6 -ServerAddresses "192.168.190.10"
+```
+verify:
+```
+PS C:\Users\Administrator> Get-DnsClientServerAddress -InterfaceIndex 6 -AddressFamily IPv4 | Select-Object InterfaceAlias,ServerAddresses
+
+InterfaceAlias ServerAddresses
+-------------- ---------------
+Ethernet0      {192.168.190.10}
+```
+
+remove the obsolete nat address:
+```
+PS C:\Users\Administrator> Remove-NetIPAddress -InterfaceIndex 6 -IPAddress "192.168.208.10" -Confirm:$false
+```
+verify the configuration so far:
+```
+PS C:\Users\Administrator> Get-NetIPConfiguration -InterfaceIndex 6 | Select-Object InterfaceAlias,InterfaceIndex,@{Name="IPv4Address";Expression={$_.IPv4Address.IPAddress}},@{Name="PrefixLength";Expression={$_.IPv4Address.PrefixLength}},@{Name="DefaultGateway";Expression={$_.IPv4DefaultGateway.NextHop}},@{Name="DNSServers";Expression={$_.DNSServer.ServerAddresses}} | Format-List
+
+
+InterfaceAlias : Ethernet0
+InterfaceIndex : 6
+IPv4Address    : 192.168.190.10
+PrefixLength   : 24
+DefaultGateway :
+DNSServers     : 192.168.190.10
+```
+
+update the domain's dns information:
+```
+PS C:\Users\Administrator> ipconfig /registerdns
+
+Windows IP Configuration
+
+Registration of the DNS resource records for all adapters of this computer has been initiated. Any errors will be reported in the Event Viewer in 15 minutes.
+```
+
+make the domain controller register its active directory service locations again:
+```
+PS C:\Users\Administrator> Restart-Service Netlogon
+WARNING: Waiting for service 'Netlogon (Netlogon)' to start...
+```
+
+verify main address record:
+```
+PS C:\Users\Administrator> Resolve-DnsName -Name "DC01.ad.pearsonspecterlitt.com" -Type A -Server "192.168.190.10"
+
+Name                                           Type   TTL   Section    IPAddress
+----                                           ----   ---   -------    ---------
+DC01.ad.pearsonspecterlitt.com                 A      1200  Question   192.168.190.10
+```
+
+verify active directory service record:
+```
+PS C:\Users\Administrator> Resolve-DnsName -Name "_ldap._tcp.dc._msdcs.ad.pearsonspecterlitt.com" -Type SRV -Server "192.168.190.10"
+
+Name                                     Type   TTL   Section    NameTarget                     Priority Weight Port
+----                                     ----   ---   -------    ----------                     -------- ------ ----
+_ldap._tcp.dc._msdcs.ad.pearsonspecterli SRV    600   Answer     dc01.ad.pearsonspecterlitt.com 0        100    389
+tt.com
+
+Name       : dc01.ad.pearsonspecterlitt.com
+QueryType  : A
+TTL        : 1200
+Section    : Additional
+IP4Address : 192.168.190.10
+```
+
+what's next:
+1. boot `DC01` and verify that its host-only ipv4 address, lack of default gateway, dns configuration, `A` record, and ldap srv record persisted before configuring `WS01`
