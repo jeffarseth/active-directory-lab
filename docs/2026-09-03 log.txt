@@ -1,0 +1,122 @@
+2026-09-03: Isolated lab validation and scenario planning
+
+once `DC01` is booted, confirm its three core domain services (NTDS, DNS, Netlogon) started:
+```
+PS C:\Users\Administrator> Get-Service NTDS,DNS,Netlogon | Select-Object Name,Status,StartType
+
+Name      Status StartType
+----      ------ ---------
+DNS      Running Automatic
+Netlogon Running Automatic
+NTDS     Running Automatic
+```
+
+boot `WS01` and verify network settings:
+```WS01
+PS C:\WINDOWS\system32> Get-NetIPConfiguration | Where-Object {$_.NetAdapter.Status -eq "Up"} | Select-Object InterfaceAlias,InterfaceIndex,@{Name="IPv4Address";Expression={$_.IPv4Address.IPAddress}},@{Name="PrefixLength";Expression={$_.IPv4Address.PrefixLength}},@{Name="DefaultGateway";Expression={$_.IPv4DefaultGateway.NextHop}},@{Name="DNSServers";Expression={$_.DNSServer.ServerAddresses}} | Format-List
+
+
+InterfaceAlias : Ethernet0
+InterfaceIndex : 6
+IPv4Address    : 192.168.190.128
+PrefixLength   : 24
+DefaultGateway :
+DNSServers     : 192.168.190.10
+```
+
+test secure channel:
+```WS01
+PS C:\WINDOWS\system32> Test-ComputerSecureChannel -Server "DC01.ad.pearsonspecterlitt.com" -Verbose
+VERBOSE: Performing the operation "Test-ComputerSecureChannel" on target "WS01".
+True
+VERBOSE: The secure channel between the local computer and the domain ad.pearsonspecterlitt.com is in good condition.
+```
+
+boot `WS02` and verify network settings:
+```WS02
+PS C:\WINDOWS\system32> Get-NetIPConfiguration | Where-Object {$_.NetAdapter.Status -eq "Up"} | Select-Object InterfaceAlias,InterfaceIndex,@{Name="IPv4Address";Expression={$_.IPv4Address.IPAddress}},@{Name="PrefixLength";Expression={$_.IPv4Address.PrefixLength}},@{Name="DefaultGateway";Expression={$_.IPv4DefaultGateway.NextHop}},@{Name="DNSServers";Expression={$_.DNSServer.ServerAddresses}} | Format-List
+
+
+InterfaceAlias : Ethernet0
+InterfaceIndex : 7
+IPv4Address    : 192.168.190.129
+PrefixLength   : 24
+DefaultGateway :
+DNSServers     : 192.168.190.10
+```
+
+test secure channel:
+```WS02
+PS C:\WINDOWS\system32> Test-ComputerSecureChannel -Server "DC01.ad.pearsonspecterlitt.com" -Verbose
+VERBOSE: Performing the operation "Test-ComputerSecureChannel" on target "WS02".
+True
+VERBOSE: The secure channel between the local computer and the domain ad.pearsonspecterlitt.com is in good condition.
+```
+
+boot `KALI01` and verify network settings:
+```KALI01
+┌──(jerry㉿kali01)-[~]
+└─$ nmcli                
+eth0: connected to Wired connection 1
+        "Intel 82545EM"
+        ethernet (e1000), 00:0C:29:C7:E5:84, hw, mtu 1500
+        inet4 192.168.190.11/24
+        route4 192.168.190.0/24 metric 100
+        inet6 fe80::20c:29ff:fec7:e584/64
+        route6 fe80::/64 metric 1024
+
+lo: connected (externally) to lo
+        "lo"
+        loopback (unknown), 00:00:00:00:00:00, sw, mtu 65536
+        inet4 127.0.0.1/8
+        inet6 ::1/128
+
+DNS configuration:
+        servers: 192.168.190.10
+        interface: eth0
+
+Use "nmcli device show" to get complete information about known devices and
+"nmcli connection show" to get an overview on active connection profiles.
+
+Consult nmcli(1) and nmcli-examples(7) manual pages for complete usage details.
+```
+
+test dns with `A` record:
+```
+┌──(jerry㉿kali01)-[~]
+└─$ dig DC01.ad.pearsonspecterlitt.com A +short
+192.168.190.10
+```
+
+verify that external routes are unreachable:
+```
+┌──(jerry㉿kali01)-[~]
+└─$ ip route get 8.8.8.8
+RTNETLINK answers: Network is unreachable
+```
+
+scenario plan (https://attack.mitre.org/techniques/enterprise/):
+
+1. over-permissive smb share
+
+- allow an unauthorized ordinary domain user to access a fake confidential share on `WS01`
+- demonstrate access from `KALI01`
+- collect relevant logon and file-share events
+- restrict access to the intended group and verify that the unauthorized user is denied
+
+2. as-rep roasting
+
+- disable kerberos preauthentication on a dedicated test account with a controlled weak password
+- request and test the resulting authentication material from `KALI01` without recording the password or complete hash
+- collect the relevant account-change and kerberos events
+- restore preauthentication, reset the password, and verify that the account is no longer roastable
+
+3. excessive local-administrator rights
+
+- add an ordinary domain test account to `WS01`'s local administrators group
+- demonstrate its administrative access from `KALI01`
+- collect the relevant group-membership, logon, privileged-logon, and process events
+- remove the membership and verify that administrative access is denied
+
+what's next:
+1. inspect and prepare the audit policies required for the three scenarios before making any misconfigurations intentionally
