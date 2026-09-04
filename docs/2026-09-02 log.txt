@@ -256,14 +256,14 @@ rtt min/avg/max/mdev = 0.461/0.542/0.641/0.064 ms
 ```
 
 test dns with `A` record:
-```
+```KALI01
 ┌──(jerry㉿kali01)-[~]
 └─$ dig DC01.ad.pearsonspecterlitt.com A +short
 192.168.190.10
 ```
 
 verify that external routes are unreachable:
-```
+```KALI01
 ┌──(jerry㉿kali01)-[~]
 └─$ ip route get 1.1.1.1
 RTNETLINK answers: Network is unreachable
