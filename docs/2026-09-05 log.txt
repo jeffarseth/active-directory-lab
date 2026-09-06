@@ -1,0 +1,327 @@
+2026-09-05: Audit policy preparation for controlled lab scenarios
+
+audit policy determines what windows records while event viewer is for reading those records.
+
+check `DC01`'s current audit policy:
+```
+PS C:\Users\Administrator> auditpol /get /category:*
+System audit policy
+Category/Subcategory                      Setting
+System
+  Security System Extension               No Auditing
+  System Integrity                        Success and Failure
+  IPsec Driver                            No Auditing
+  Other System Events                     Success and Failure
+  Security State Change                   Success
+Logon/Logoff
+  Logon                                   Success and Failure
+  Logoff                                  Success
+  Account Lockout                         Success
+  IPsec Main Mode                         No Auditing
+  IPsec Quick Mode                        No Auditing
+  IPsec Extended Mode                     No Auditing
+  Special Logon                           Success
+  Other Logon/Logoff Events               No Auditing
+  Network Policy Server                   Success and Failure
+  User / Device Claims                    No Auditing
+  Group Membership                        No Auditing
+  Access Rights                           No Auditing
+Object Access
+  File System                             No Auditing
+  Registry                                No Auditing
+  Kernel Object                           No Auditing
+  SAM                                     No Auditing
+  Certification Services                  No Auditing
+  Application Generated                   No Auditing
+  Handle Manipulation                     No Auditing
+  File Share                              No Auditing
+  Filtering Platform Packet Drop          No Auditing
+  Filtering Platform Connection           No Auditing
+  Other Object Access Events              No Auditing
+  Detailed File Share                     No Auditing
+  Removable Storage                       No Auditing
+  Central Policy Staging                  No Auditing
+Privilege Use
+  Non Sensitive Privilege Use             No Auditing
+  Other Privilege Use Events              No Auditing
+  Sensitive Privilege Use                 No Auditing
+Detailed Tracking
+  Process Creation                        No Auditing
+  Process Termination                     No Auditing
+  DPAPI Activity                          No Auditing
+  RPC Events                              No Auditing
+  Plug and Play Events                    No Auditing
+  Token Right Adjusted Events             No Auditing
+Policy Change
+  Audit Policy Change                     Success
+  Authentication Policy Change            Success
+  Authorization Policy Change             No Auditing
+  MPSSVC Rule-Level Policy Change         No Auditing
+  Filtering Platform Policy Change        No Auditing
+  Other Policy Change Events              No Auditing
+Account Management
+  Computer Account Management             Success
+  Security Group Management               Success
+  Distribution Group Management           No Auditing
+  Application Group Management            No Auditing
+  Other Account Management Events         No Auditing
+  User Account Management                 Success
+DS Access
+  Directory Service Access                Success
+  Directory Service Changes               No Auditing
+  Directory Service Replication           No Auditing
+  Detailed Directory Service Replication  No Auditing
+Account Logon
+  Kerberos Service Ticket Operations      Success
+  Other Account Logon Events              No Auditing
+  Kerberos Authentication Service         Success
+  Credential Validation                   Success
+```
+settings to watch out for are:
+1. `Kerberos Authentication Service` to show `Success` since it records successful kerberos ticket requests, relevant to AS-REP roasting.
+2. `User Account Management` to show `Success` because it records changes to domain user accounts.
+3. `Security Group Management` to show `Success` because it records changes to domain security groups.
+4. `Logon` to show `Success` and `Failure` because it records successful and failed logon attempts on `DC01`.
+
+check `WS01`'s current audit policy:
+```WS01
+PS C:\WINDOWS\system32> auditpol /get /category:*
+System audit policy
+Category/Subcategory                      Setting
+System
+  Security System Extension               No Auditing
+  System Integrity                        Success and Failure
+  IPsec Driver                            No Auditing
+  Other System Events                     Success and Failure
+  Security State Change                   Success
+Logon/Logoff
+  Logon                                   Success and Failure
+  Logoff                                  Success
+  Account Lockout                         Success
+  IPsec Main Mode                         No Auditing
+  IPsec Quick Mode                        No Auditing
+  IPsec Extended Mode                     No Auditing
+  Special Logon                           Success
+  Other Logon/Logoff Events               No Auditing
+  Network Policy Server                   Success and Failure
+  User / Device Claims                    No Auditing
+  Group Membership                        No Auditing
+  Access Rights                           No Auditing
+Object Access
+  File System                             No Auditing
+  Registry                                No Auditing
+  Kernel Object                           No Auditing
+  SAM                                     No Auditing
+  Certification Services                  No Auditing
+  Application Generated                   No Auditing
+  Handle Manipulation                     No Auditing
+  File Share                              No Auditing
+  Filtering Platform Packet Drop          No Auditing
+  Filtering Platform Connection           No Auditing
+  Other Object Access Events              No Auditing
+  Detailed File Share                     No Auditing
+  Removable Storage                       No Auditing
+  Central Policy Staging                  No Auditing
+Privilege Use
+  Non Sensitive Privilege Use             No Auditing
+  Other Privilege Use Events              No Auditing
+  Sensitive Privilege Use                 No Auditing
+Detailed Tracking
+  Process Creation                        No Auditing
+  Process Termination                     No Auditing
+  DPAPI Activity                          No Auditing
+  RPC Events                              No Auditing
+  Plug and Play Events                    No Auditing
+  Token Right Adjusted Events             No Auditing
+Policy Change
+  Audit Policy Change                     Success
+  Authentication Policy Change            Success
+  Authorization Policy Change             No Auditing
+  MPSSVC Rule-Level Policy Change         No Auditing
+  Filtering Platform Policy Change        No Auditing
+  Other Policy Change Events              No Auditing
+Account Management
+  Computer Account Management             No Auditing
+  Security Group Management               Success
+  Distribution Group Management           No Auditing
+  Application Group Management            No Auditing
+  Other Account Management Events         No Auditing
+  User Account Management                 Success
+DS Access
+  Directory Service Access                No Auditing
+  Directory Service Changes               No Auditing
+  Directory Service Replication           No Auditing
+  Detailed Directory Service Replication  No Auditing
+Account Logon
+  Kerberos Service Ticket Operations      No Auditing
+  Other Account Logon Events              No Auditing
+  Kerberos Authentication Service         No Auditing
+  Credential Validation                   No Auditing
+```
+settings to watch out for are:
+1. `File Share` to show `Success and Failure` because it records shared folders
+2. `Detailed File Share` to show `Success and Failure` because it records specific files accessed and its access requests.
+3. `Process Creation` to show `Success` because it records programs started during the administrator-access test.
+4. `Security Group Management` to show `Success` because it records changes to local security groups.
+5. `Logon` to show `Success` and `Failure` because it records successful and failed logon attempts on `WS01`.
+
+check which computer group policies apply to `WS01`:
+```WS01
+PS C:\WINDOWS\system32> gpresult /Scope Computer /R
+
+Microsoft (R) Windows (R) Operating System Group Policy Result tool v2.0
+© Microsoft Corporation. All rights reserved.
+
+Created on ‎9/‎5/‎2026 at 10:11:01 PM
+
+
+RSOP data for  on WS01 : Logging Mode
+--------------------------------------
+
+OS Configuration:            Member Workstation
+OS Version:                  10.0.26200
+Site Name:                   Default-First-Site-Name
+Roaming Profile:
+Local Profile:
+Connected over a slow link?: No
+
+
+COMPUTER SETTINGS
+------------------
+
+    Last time Group Policy was applied: 9/5/2026 at 9:56:02 PM
+    Group Policy was applied from:      DC01.ad.pearsonspecterlitt.com
+    Group Policy slow link threshold:   500 kbps
+    Domain Name:                        PSL
+    Domain Type:                        Windows 2008 or later
+
+    Applied Group Policy Objects
+    -----------------------------
+        Default Domain Policy
+
+    The following GPOs were not applied because they were filtered out
+    -------------------------------------------------------------------
+        Local Group Policy
+            Filtering:  Not Applied (Empty)
+
+    The computer is a part of the following security groups
+    -------------------------------------------------------
+        BUILTIN\Administrators
+        Everyone
+        BUILTIN\Users
+        NT AUTHORITY\NETWORK
+        NT AUTHORITY\Authenticated Users
+        This Organization
+        WS01$
+        Domain Computers
+        Authentication authority asserted identity
+        System Mandatory Level
+```
+`WS01` received its domain policies from `DC01` with `Default Domain Policy`.
+
+check which computer group policies apply to `DC01`:
+```
+PS C:\Users\Administrator> gpresult /Scope Computer /R
+
+Microsoft (R) Windows (R) Operating System Group Policy Result tool v2.0
+© Microsoft Corporation. All rights reserved.
+
+Created on ‎9/‎6/‎2026 at 7:09:13 AM
+
+
+RSOP data for  on DC01 : Logging Mode
+--------------------------------------
+
+OS Configuration:            Primary Domain Controller
+OS Version:                  10.0.26100
+Site Name:                   Default-First-Site-Name
+Roaming Profile:
+Local Profile:
+Connected over a slow link?: No
+
+
+COMPUTER SETTINGS
+------------------
+    CN=DC01,OU=Domain Controllers,DC=ad,DC=pearsonspecterlitt,DC=com
+    Last time Group Policy was applied: 9/6/2026 at 7:07:08 AM
+    Group Policy was applied from:      DC01.ad.pearsonspecterlitt.com
+    Group Policy slow link threshold:   500 kbps
+    Domain Name:                        PSL
+    Domain Type:                        Windows 2008 or later
+
+    Applied Group Policy Objects
+    -----------------------------
+        Default Domain Controllers Policy
+        Default Domain Policy
+
+    The following GPOs were not applied because they were filtered out
+    -------------------------------------------------------------------
+        Local Group Policy
+            Filtering:  Not Applied (Empty)
+
+    The computer is a part of the following security groups
+    -------------------------------------------------------
+        BUILTIN\Administrators
+        Everyone
+        BUILTIN\Users
+        BUILTIN\Pre-Windows 2000 Compatible Access
+        Windows Authorization Access Group
+        NT AUTHORITY\NETWORK
+        NT AUTHORITY\Authenticated Users
+        This Organization
+        DC01$
+        Domain Controllers
+        NT AUTHORITY\ENTERPRISE DOMAIN CONTROLLERS
+        Authentication authority asserted identity
+        Denied RODC Password Replication Group
+        System Mandatory Level
+```
+`DC01` has applied `Default Domain Policy` and `Default Domain Controllers Policy`
+
+generate a raw `.xml` report to read `Default Domain Policy` report:
+```
+PS C:\Users\Administrator> Get-GPOReport -Name "Default Domain Policy" -ReportType Xml
+```
+
+if you want a readable version of this, make a `.html` file in a temp folder and open it in an internet browser:
+```
+PS C:\Users\Administrator> Get-GPOReport -Name "Default Domain Policy" -ReportType Html -Path "$env:TEMP\Default-Domain-Policy.html"
+PS C:\Users\Administrator> Invoke-Item "$env:TEMP\Default-Domain-Policy.html"
+```
+
+inspect `Security Settings`:
+- password policy
+- account lockout policy
+- kerberos policy
+- local security options
+- encrypting file system recovery certificate settings
+
+no basic or advanced audit policy settings are visible in this section.
+
+this does not mean auditing is disabled. `auditpol` showed the effective auditing settings on each machine.
+
+generate `.html` output file to read `Default Domain Controllers Policy` report:
+```
+PS C:\Users\Administrator> Get-GPOReport -Name "Default Domain Controllers Policy" -ReportType Html -Path "$env:TEMP\Default-Domain-Controllers-Policy.html"
+PS C:\Users\Administrator> Invoke-Item "$env:TEMP\Default-Domain-Controllers-Policy.html"
+```
+
+inspect `Security Settings` and look for audit policies.
+no basic or advanced audit policy settings should appear.
+
+back up `DC01`'s current audit settings before additional configurations:
+```
+PS C:\Users\Administrator> New-Item -Path "C:\LabBackups\AuditPolicy" -ItemType Directory -Force | Out-Null
+PS C:\Users\Administrator> auditpol /backup /file:"C:\LabBackups\AuditPolicy\DC01-audit-before-2026-09-06.csv"
+The command was successfully executed.
+```
+
+back up `WS01`'s current audit settings before additional configurations:
+```WS01
+PS C:\WINDOWS\system32> New-Item -Path "C:\LabBackups\AuditPolicy" -ItemType Directory -Force | Out-Null
+PS C:\WINDOWS\system32> auditpol /backup /file:"C:\LabBackups\AuditPolicy\WS01-audit-before-2026-09-06.csv"
+The command was successfully executed.
+```
+
+what's next:
+1. choose whether to configure the required audit subcategories through dedicated gpos or local `auditpol` commands
