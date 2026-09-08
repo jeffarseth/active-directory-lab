@@ -1,0 +1,585 @@
+2026-09-07: Audit policy configuration and validation
+
+choosing how to manage the audit settings:
+1. dedicated gpos
+2. local `auditpol` commands
+decision: dedicated gpos for the domain administration experience
+
+create a policy for `WS01`'s audit settings:
+```
+PS C:\Users\Administrator> New-GPO -Name "PSL-WS01-Auditing" -Comment "Audit policy for WS01 controlled lab scenarios"
+
+
+DisplayName      : PSL-WS01-Auditing
+DomainName       : ad.pearsonspecterlitt.com
+Owner            : PSL\Domain Admins
+Id               : fc3d4084-4670-4618-8f04-88d6b8908464
+GpoStatus        : AllSettingsEnabled
+Description      : Audit policy for WS01 controlled lab scenarios
+CreationTime     : 9/7/2026 1:24:02 PM
+ModificationTime : 9/7/2026 1:24:02 PM
+UserVersion      : AD Version: 0, SysVol Version: 0
+ComputerVersion  : AD Version: 0, SysVol Version: 0
+WmiFilter        :
+```
+
+i am going to use group policy management to configure the gpo's advanced audit settings because the standard group policy powershell module has no dedicated cmdlet for editing these settings.
+
+open group policy management:
+```
+PS C:\Users\Administrator> gpmc.msc
+```
+and edit `PSL-WS01-Auditing` in `Group Policy Objects`.
+
+navigate to:
+Computer Configuration
+->	Policies
+	->	Windows Settings
+		->	Security Settings
+			->	Advanced Audit Policy Configuration
+				->	Audit Policies
+
+
+for `Account Management`:
+
+configure `Audit Security Group Management`:
+- Configure the following audit events: selected
+- Success: selected
+- Failure: not selected
+
+this records changes to local security groups, including changes to the local `Administrators` group.
+
+configure `Audit User Account Management`:
+- Configure the following audit events: selected
+- Success: selected
+- Failure: not selected
+
+this records changes to local user accounts on `WS01`.
+
+
+for `Detailed Tracking`:
+
+configure `Audit Process Creation`:
+- Configure the following audit events: selected
+- Success: selected
+- Failure: not selected
+
+this records programs started, supporting investigation of activity during the administrator-access scenario.
+
+
+for `Logon/Logoff`:
+
+configure `Audit Account Lockout`:
+- Configure the following audit events: selected
+- Success: not selected
+- Failure: selected
+
+this records failed sign-in attempts made while an account is already locked out.
+
+configure `Audit Logoff`:
+- Configure the following audit events: selected
+- Success: selected
+- Failure: not selected
+
+this records logon sessions ending.
+
+configure `Audit Logon`:
+- Configure the following audit events: selected
+- Success: selected
+- Failure: selected
+
+this records successful and failed logon attempts on `WS01`.
+
+configure `Audit Network Policy Server`:
+- Configure the following audit events: selected
+- Success: selected
+- Failure: selected
+
+this records network-access decisions made by `Network Policy Server`, such as granting or denying a user's VPN connection.
+`WS01` cannot host the nps server role. this setting is retained only to match the previous audit baseline.
+it is not required for the scenarios.
+
+configure `Audit Special Logon`:
+- Configure the following audit events: selected
+- Success: selected
+- Failure: not selected
+
+this records sensitive privileges assigned to new logon sessions.
+
+
+for `Object Access`:
+
+configure `Audit File Share`:
+- Configure the following audit events: selected
+- Success: selected
+- Failure: selected
+
+this records events involving shared folders, including their creation, modification, deletion, and access.
+
+configure `Audit Detailed File Share`:
+- Configure the following audit events: selected
+- Success: selected
+- Failure: selected
+
+this records permission checks for individual files and folders requested through network shares.
+
+
+for `Policy Change`:
+
+configure `Audit Audit Policy Change`:
+- Configure the following audit events: selected
+- Success: selected
+- Failure: not selected
+
+this records changes to auditing settings.
+
+configure `Audit Authentication Policy Change`:
+- Configure the following audit events: selected
+- Success: selected
+- Failure: not selected
+
+this records changes to authentication policy.
+
+
+for `System`:
+
+configure `Audit Other System Events`:
+- Configure the following audit events: selected
+- Success: selected
+- Failure: selected
+
+this records miscellaneous security-related system events.
+
+configure `Audit Security State Change`:
+- Configure the following audit events: selected
+- Success: selected
+- Failure: not selected
+
+this records events such as Windows startup, shutdown, and system-time changes.
+
+configure `Audit System Integrity`:
+- Configure the following audit events: selected
+- Success: selected
+- Failure: selected
+
+this records system-integrity events, including detected integrity violations.
+
+navigate to:
+Computer Configuration
+->	Policies
+	->	Windows Settings
+		->	Security Settings
+			->	Local Policies
+				->	Security Options
+
+configure `Audit: Force audit policy subcategory settings (Windows Vista or later) to override audit policy category settings`:
+- Define this policy setting: selected
+- Enabled: selected
+
+this gives the detailed audit subcategory settings priority over the older, broad audit category settings.
+
+give `Authenticated Users` permission to read the gpo, replacing its default permission to apply it:
+```
+PS C:\Users\Administrator> Set-GPPermission -Name "PSL-WS01-Auditing" -TargetName "Authenticated Users" -TargetType Group -PermissionLevel GpoRead -Replace
+
+
+DisplayName      : PSL-WS01-Auditing
+DomainName       : ad.pearsonspecterlitt.com
+Owner            : PSL\Domain Admins
+Id               : fc3d4084-4670-4618-8f04-88d6b8908464
+GpoStatus        : AllSettingsEnabled
+Description      : Audit policy for WS01 controlled lab scenarios
+CreationTime     : 9/7/2026 1:24:02 PM
+ModificationTime : 9/7/2026 2:38:26 PM
+UserVersion      : AD Version: 0, SysVol Version: 0
+ComputerVersion  : AD Version: 19, SysVol Version: 19
+WmiFilter        :
+```
+
+allow `WS01`'s computer account to apply it:
+```
+PS C:\Users\Administrator> Set-GPPermission -Name "PSL-WS01-Auditing" -TargetName "WS01" -TargetType Computer -PermissionLevel GpoApply
+
+
+DisplayName      : PSL-WS01-Auditing
+DomainName       : ad.pearsonspecterlitt.com
+Owner            : PSL\Domain Admins
+Id               : fc3d4084-4670-4618-8f04-88d6b8908464
+GpoStatus        : AllSettingsEnabled
+Description      : Audit policy for WS01 controlled lab scenarios
+CreationTime     : 9/7/2026 1:24:02 PM
+ModificationTime : 9/7/2026 6:17:20 PM
+UserVersion      : AD Version: 0, SysVol Version: 0
+ComputerVersion  : AD Version: 19, SysVol Version: 19
+WmiFilter        :
+```
+
+verify:
+```
+PS C:\Users\Administrator> Get-GPPermission -Name "PSL-WS01-Auditing" -All | Select-Object @{Name="Trustee";Expression={$_.Trustee.Name}},Permission,Inherited | Format-Table -AutoSize
+
+Trustee                                        Permission Inherited
+-------                                        ---------- ---------
+WS01$                                            GpoApply     False
+Domain Admins                 GpoEditDeleteModifySecurity     False
+Enterprise Admins             GpoEditDeleteModifySecurity     False
+Authenticated Users                               GpoRead     False
+ENTERPRISE DOMAIN CONTROLLERS                     GpoRead     False
+SYSTEM                        GpoEditDeleteModifySecurity     False
+```
+`WS01$` is the computer account and it has `GpoApply`
+`Authenticated Users` has `GpoRead`
+
+link the gpo to `Workstations` ou:
+```
+PS C:\Users\Administrator> New-GPLink -Name "PSL-WS01-Auditing" -Target "OU=Workstations,DC=ad,DC=pearsonspecterlitt,DC=com" -LinkEnabled Yes
+
+
+GpoId       : fc3d4084-4670-4618-8f04-88d6b8908464
+DisplayName : PSL-WS01-Auditing
+Enabled     : True
+Enforced    : False
+Target      : OU=Workstations,DC=ad,DC=pearsonspecterlitt,DC=com
+Order       : 1
+```
+
+refresh `WS01`'s computer policies instead of waiting for the scheduled refresh:
+```WS01
+PS C:\WINDOWS\system32> gpupdate /Target:Computer /Force
+Updating policy...
+
+Computer Policy update has completed successfully.
+```
+
+inspect the effective audit settings:
+```WS01
+PS C:\WINDOWS\system32> auditpol /get /category:*
+System audit policy
+Category/Subcategory                      Setting
+System
+  Security System Extension               No Auditing
+  System Integrity                        Success and Failure
+  IPsec Driver                            No Auditing
+  Other System Events                     Success and Failure
+  Security State Change                   Success
+Logon/Logoff
+  Logon                                   Success and Failure
+  Logoff                                  Success
+  Account Lockout                         Failure
+  IPsec Main Mode                         No Auditing
+  IPsec Quick Mode                        No Auditing
+  IPsec Extended Mode                     No Auditing
+  Special Logon                           No Auditing
+  Other Logon/Logoff Events               No Auditing
+  Network Policy Server                   Success and Failure
+  User / Device Claims                    No Auditing
+  Group Membership                        No Auditing
+  Access Rights                           No Auditing
+Object Access
+  File System                             No Auditing
+  Registry                                No Auditing
+  Kernel Object                           No Auditing
+  SAM                                     No Auditing
+  Certification Services                  No Auditing
+  Application Generated                   No Auditing
+  Handle Manipulation                     No Auditing
+  File Share                              Success and Failure
+  Filtering Platform Packet Drop          No Auditing
+  Filtering Platform Connection           No Auditing
+  Other Object Access Events              No Auditing
+  Detailed File Share                     Success and Failure
+  Removable Storage                       No Auditing
+  Central Policy Staging                  No Auditing
+Privilege Use
+  Non Sensitive Privilege Use             No Auditing
+  Other Privilege Use Events              No Auditing
+  Sensitive Privilege Use                 No Auditing
+Detailed Tracking
+  Process Creation                        Success
+  Process Termination                     No Auditing
+  DPAPI Activity                          No Auditing
+  RPC Events                              No Auditing
+  Plug and Play Events                    No Auditing
+  Token Right Adjusted Events             No Auditing
+Policy Change
+  Audit Policy Change                     Success
+  Authentication Policy Change            Success
+  Authorization Policy Change             No Auditing
+  MPSSVC Rule-Level Policy Change         No Auditing
+  Filtering Platform Policy Change        No Auditing
+  Other Policy Change Events              No Auditing
+Account Management
+  Computer Account Management             No Auditing
+  Security Group Management               Success
+  Distribution Group Management           No Auditing
+  Application Group Management            No Auditing
+  Other Account Management Events         No Auditing
+  User Account Management                 Success
+DS Access
+  Directory Service Access                No Auditing
+  Directory Service Changes               No Auditing
+  Directory Service Replication           No Auditing
+  Detailed Directory Service Replication  No Auditing
+Account Logon
+  Kerberos Service Ticket Operations      No Auditing
+  Other Account Logon Events              No Auditing
+  Kerberos Authentication Service         No Auditing
+  Credential Validation                   No Auditing
+```
+`Special Logon` should say `Success`, i mustve missed that on my part. i am going to go to the audit policies and put `Audit Special Logon` to `Success`.
+
+retry inspection again:
+```WS01
+PS C:\WINDOWS\system32> gpupdate /Target:Computer /Force
+Updating policy...
+
+Computer Policy update has completed successfully.
+PS C:\WINDOWS\system32> auditpol /get /category:*
+System audit policy
+Category/Subcategory                      Setting
+System
+  Security System Extension               No Auditing
+  System Integrity                        Success and Failure
+  IPsec Driver                            No Auditing
+  Other System Events                     Success and Failure
+  Security State Change                   Success
+Logon/Logoff
+  Logon                                   Success and Failure
+  Logoff                                  Success
+  Account Lockout                         Failure
+  IPsec Main Mode                         No Auditing
+  IPsec Quick Mode                        No Auditing
+  IPsec Extended Mode                     No Auditing
+  Special Logon                           Success
+  Other Logon/Logoff Events               No Auditing
+  Network Policy Server                   Success and Failure
+  User / Device Claims                    No Auditing
+  Group Membership                        No Auditing
+  Access Rights                           No Auditing
+Object Access
+  File System                             No Auditing
+  Registry                                No Auditing
+  Kernel Object                           No Auditing
+  SAM                                     No Auditing
+  Certification Services                  No Auditing
+  Application Generated                   No Auditing
+  Handle Manipulation                     No Auditing
+  File Share                              Success and Failure
+  Filtering Platform Packet Drop          No Auditing
+  Filtering Platform Connection           No Auditing
+  Other Object Access Events              No Auditing
+  Detailed File Share                     Success and Failure
+  Removable Storage                       No Auditing
+  Central Policy Staging                  No Auditing
+Privilege Use
+  Non Sensitive Privilege Use             No Auditing
+  Other Privilege Use Events              No Auditing
+  Sensitive Privilege Use                 No Auditing
+Detailed Tracking
+  Process Creation                        Success
+  Process Termination                     No Auditing
+  DPAPI Activity                          No Auditing
+  RPC Events                              No Auditing
+  Plug and Play Events                    No Auditing
+  Token Right Adjusted Events             No Auditing
+Policy Change
+  Audit Policy Change                     Success
+  Authentication Policy Change            Success
+  Authorization Policy Change             No Auditing
+  MPSSVC Rule-Level Policy Change         No Auditing
+  Filtering Platform Policy Change        No Auditing
+  Other Policy Change Events              No Auditing
+Account Management
+  Computer Account Management             No Auditing
+  Security Group Management               Success
+  Distribution Group Management           No Auditing
+  Application Group Management            No Auditing
+  Other Account Management Events         No Auditing
+  User Account Management                 Success
+DS Access
+  Directory Service Access                No Auditing
+  Directory Service Changes               No Auditing
+  Directory Service Replication           No Auditing
+  Detailed Directory Service Replication  No Auditing
+Account Logon
+  Kerberos Service Ticket Operations      No Auditing
+  Other Account Logon Events              No Auditing
+  Kerberos Authentication Service         No Auditing
+  Credential Validation                   No Auditing
+```
+
+verify that `WS01` applies the gpo and `WS02` is excluded:
+```WS01
+PS C:\WINDOWS\system32> gpresult /Scope Computer /R
+
+Microsoft (R) Windows (R) Operating System Group Policy Result tool v2.0
+© Microsoft Corporation. All rights reserved.
+
+Created on ‎9/‎7/‎2026 at 7:12:25 PM
+
+
+RSOP data for  on WS01 : Logging Mode
+--------------------------------------
+
+OS Configuration:            Member Workstation
+OS Version:                  10.0.26200
+Site Name:                   Default-First-Site-Name
+Roaming Profile:
+Local Profile:
+Connected over a slow link?: No
+
+
+COMPUTER SETTINGS
+------------------
+
+    Last time Group Policy was applied: 9/7/2026 at 6:56:39 PM
+    Group Policy was applied from:      DC01.ad.pearsonspecterlitt.com
+    Group Policy slow link threshold:   500 kbps
+    Domain Name:                        PSL
+    Domain Type:                        Windows 2008 or later
+
+    Applied Group Policy Objects
+    -----------------------------
+        PSL-WS01-Auditing
+        Default Domain Policy
+
+    The following GPOs were not applied because they were filtered out
+    -------------------------------------------------------------------
+        Local Group Policy
+            Filtering:  Not Applied (Empty)
+
+    The computer is a part of the following security groups
+    -------------------------------------------------------
+        BUILTIN\Administrators
+        Everyone
+        BUILTIN\Users
+        NT AUTHORITY\NETWORK
+        NT AUTHORITY\Authenticated Users
+        This Organization
+        WS01$
+        Domain Computers
+        Authentication authority asserted identity
+        System Mandatory Level
+```
+`PSL-WS01-Auditing` appears under `Applied Group Policy Objects`
+
+refresh `WS02`'s computer policies then inspect its gpo:
+```WS02
+PS C:\WINDOWS\system32> gpupdate /Target:Computer /Force
+Updating policy...
+
+Computer Policy update has completed successfully.
+
+PS C:\WINDOWS\system32> gpresult /Scope Computer /R
+
+Microsoft (R) Windows (R) Operating System Group Policy Result tool v2.0
+© Microsoft Corporation. All rights reserved.
+
+Created on ‎9/‎7/‎2026 at 7:14:51 PM
+
+
+RSOP data for  on WS02 : Logging Mode
+--------------------------------------
+
+OS Configuration:            Member Workstation
+OS Version:                  10.0.26200
+Site Name:                   Default-First-Site-Name
+Roaming Profile:
+Local Profile:
+Connected over a slow link?: No
+
+
+COMPUTER SETTINGS
+------------------
+
+    Last time Group Policy was applied: 9/7/2026 at 7:14:41 PM
+    Group Policy was applied from:      DC01.ad.pearsonspecterlitt.com
+    Group Policy slow link threshold:   500 kbps
+    Domain Name:                        PSL
+    Domain Type:                        Windows 2008 or later
+
+    Applied Group Policy Objects
+    -----------------------------
+        Default Domain Policy
+
+    The following GPOs were not applied because they were filtered out
+    -------------------------------------------------------------------
+        PSL-WS01-Auditing
+            Filtering:  Denied (Security)
+
+        Local Group Policy
+            Filtering:  Not Applied (Empty)
+
+    The computer is a part of the following security groups
+    -------------------------------------------------------
+        BUILTIN\Administrators
+        Everyone
+        BUILTIN\Users
+        NT AUTHORITY\NETWORK
+        NT AUTHORITY\Authenticated Users
+        This Organization
+        WS02$
+        Domain Computers
+        Authentication authority asserted identity
+        System Mandatory Level
+```
+`WS02` can read `PSL-WS01-Auditing` but it is not applied.
+
+now to test whether process creation auditing produces an event.
+
+run `whoami` to generate a process-creation event:
+```WS01
+PS C:\WINDOWS\system32> whoami
+ws01\ws01-admin
+```
+
+search the last five minutes of the security log and displays the newest matching event:
+```WS01
+PS C:\WINDOWS\system32> Get-WinEvent -FilterHashtable @{LogName="Security";Id=4688;StartTime=(Get-Date).AddMinutes(-5)} | Where-Object {$_.Message -like "*\whoami.exe*"} | Select-Object -First 1 TimeCreated,Id,Message | Format-List
+
+
+TimeCreated : 9/7/2026 7:27:48 PM
+Id          : 4688
+Message     : A new process has been created.
+
+              Creator Subject:
+                Security ID:            S-1-5-21-812095790-3273921031-1418192876-1001
+                Account Name:           ws01-admin
+                Account Domain:         WS01
+                Logon ID:               0x5A51B
+
+              Target Subject:
+                Security ID:            S-1-0-0
+                Account Name:           -
+                Account Domain:         -
+                Logon ID:               0x0
+
+              Process Information:
+                New Process ID:         0x7cc
+                New Process Name:       C:\Windows\System32\whoami.exe
+                Token Elevation Type:   TokenElevationTypeFull (2)
+                Mandatory Label:                S-1-16-12288
+                Creator Process ID:     0xf9c
+                Creator Process Name:   C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe
+                Process Command Line:
+
+              Token Elevation Type indicates the type of token that was assigned to the new process in accordance with User Account
+              Control policy.
+
+              Type 1 is a full token with no privileges removed or groups disabled.  A full token is only used if User Account Control
+              is disabled or if the user is the built-in Administrator account or a service account.
+
+              Type 2 is an elevated token with no privileges removed or groups disabled.  An elevated token is used when User Account
+              Control is enabled and the user chooses to start the program using Run as administrator.  An elevated token is also used
+              when an application is configured to always require administrative privilege or to always require maximum privilege, and
+              the user is a member of the Administrators group.
+
+              Type 3 is a limited token with administrative privileges removed and administrative groups disabled.  The limited token
+              is used when User Account Control is enabled, the application does not require administrative privilege, and the user
+              does not choose to start the program using Run as administrator.
+```
+`PSL-WS01-Auditing` is linked to the `Workstations` ou and applies to `WS01`. `WS02` is excluded by security filtering.
+event `4688` confirms that process-creation auditing recorded `whoami.exe` on `WS01`.
+
+what's next:
+1. create, configure, and validate a dedicated audit gpo for `DC01`
