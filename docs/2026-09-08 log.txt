@@ -1,0 +1,504 @@
+2026-09-08: DC01 audit policy configuration and validation
+
+confirm the audit backup is available:
+```
+PS C:\Users\Administrator> Get-Item "C:\LabBackups\AuditPolicy\DC01-audit-before-2026-09-06.csv" | Select-Object FullName,Length,LastWriteTime
+
+FullName                                                   Length LastWriteTime
+--------                                                   ------ -------------
+C:\LabBackups\AuditPolicy\DC01-audit-before-2026-09-06.csv   5615 9/6/2026 8:28:20 AM
+```
+
+inspect the current audit policy:
+```
+PS C:\Users\Administrator> auditpol /get /category:*
+System audit policy
+Category/Subcategory                      Setting
+System
+  Security System Extension               No Auditing
+  System Integrity                        Success and Failure
+  IPsec Driver                            No Auditing
+  Other System Events                     Success and Failure
+  Security State Change                   Success
+Logon/Logoff
+  Logon                                   Success and Failure
+  Logoff                                  Success
+  Account Lockout                         Success
+  IPsec Main Mode                         No Auditing
+  IPsec Quick Mode                        No Auditing
+  IPsec Extended Mode                     No Auditing
+  Special Logon                           Success
+  Other Logon/Logoff Events               No Auditing
+  Network Policy Server                   Success and Failure
+  User / Device Claims                    No Auditing
+  Group Membership                        No Auditing
+  Access Rights                           No Auditing
+Object Access
+  File System                             No Auditing
+  Registry                                No Auditing
+  Kernel Object                           No Auditing
+  SAM                                     No Auditing
+  Certification Services                  No Auditing
+  Application Generated                   No Auditing
+  Handle Manipulation                     No Auditing
+  File Share                              No Auditing
+  Filtering Platform Packet Drop          No Auditing
+  Filtering Platform Connection           No Auditing
+  Other Object Access Events              No Auditing
+  Detailed File Share                     No Auditing
+  Removable Storage                       No Auditing
+  Central Policy Staging                  No Auditing
+Privilege Use
+  Non Sensitive Privilege Use             No Auditing
+  Other Privilege Use Events              No Auditing
+  Sensitive Privilege Use                 No Auditing
+Detailed Tracking
+  Process Creation                        No Auditing
+  Process Termination                     No Auditing
+  DPAPI Activity                          No Auditing
+  RPC Events                              No Auditing
+  Plug and Play Events                    No Auditing
+  Token Right Adjusted Events             No Auditing
+Policy Change
+  Audit Policy Change                     Success
+  Authentication Policy Change            Success
+  Authorization Policy Change             No Auditing
+  MPSSVC Rule-Level Policy Change         No Auditing
+  Filtering Platform Policy Change        No Auditing
+  Other Policy Change Events              No Auditing
+Account Management
+  Computer Account Management             Success
+  Security Group Management               Success
+  Distribution Group Management           No Auditing
+  Application Group Management            No Auditing
+  Other Account Management Events         No Auditing
+  User Account Management                 Success
+DS Access
+  Directory Service Access                Success
+  Directory Service Changes               No Auditing
+  Directory Service Replication           No Auditing
+  Detailed Directory Service Replication  No Auditing
+Account Logon
+  Kerberos Service Ticket Operations      Success
+  Other Account Logon Events              No Auditing
+  Kerberos Authentication Service         Success
+  Credential Validation                   Success
+```
+
+record whether detailed audit settings currently take priority over the older broad categories (detailed rules priority):
+```
+PS C:\Users\Administrator> Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa" -Name "SCENoApplyLegacyAuditPolicy" | Select-Object SCENoApplyLegacyAuditPolicy
+Get-ItemProperty : Property SCENoApplyLegacyAuditPolicy does not exist at path
+HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Lsa.
+At line:1 char:1
++ Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa" - ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidArgument: (SCENoApplyLegacyAuditPolicy:String) [Get-ItemProperty], PSArgumentExce
+   ption
+    + FullyQualifiedErrorId : System.Management.Automation.PSArgumentException,Microsoft.PowerShell.Commands.GetItemPr
+   opertyCommand
+```
+`SCENoApplyLegacyAuditPolicy` isn't present in `DC01`'s registry. the new gpo will configure the audit subcategory override as `Enabled`.
+
+create `DC01`'s gpo:
+```
+PS C:\Users\Administrator> New-GPO -Name "PSL-DC01-Auditing" -Comment "Audit policy for DC01 controlled lab scenarios"
+
+
+DisplayName      : PSL-DC01-Auditing
+DomainName       : ad.pearsonspecterlitt.com
+Owner            : PSL\Domain Admins
+Id               : c72ff3e6-bddf-4c54-a7cc-91ed6ee73de3
+GpoStatus        : AllSettingsEnabled
+Description      : Audit policy for DC01 controlled lab scenarios
+CreationTime     : 9/8/2026 6:43:30 PM
+ModificationTime : 9/8/2026 6:43:30 PM
+UserVersion      : AD Version: 0, SysVol Version: 0
+ComputerVersion  : AD Version: 0, SysVol Version: 0
+WmiFilter        :
+```
+
+open group policy management:
+```
+PS C:\Users\Administrator> gpmc.msc
+```
+and edit `PSL-DC01-Auditing` in `Group Policy Objects`.
+
+navigate to:
+Computer Configuration
+->	Policies
+	->	Windows Settings
+		->	Security Settings
+			->	Advanced Audit Policy Configuration
+				->	Audit Policies
+
+for `Account Logon`:
+
+configure `Audit Credential Validation`:
+- Configure the following audit events: selected
+- Success: selected
+- Failure: selected
+
+this records accepted and rejected domain-account credential checks using ntlm.
+
+configure `Audit Kerberos Authentication Service`:
+- Configure the following audit events: selected
+- Success: selected
+- Failure: selected
+
+this records successful and failed requests for an initial kerberos authentication ticket, including preauthentication failures.
+
+configure `Audit Kerberos Service Ticket Operations`:
+- Configure the following audit events: selected
+- Success: selected
+- Failure: not selected
+
+this records successful requests for kerberos tickets used to access services.
+
+
+for `Account Management`:
+
+configure `Audit Computer Account Management`:
+- Configure the following audit events: selected
+- Success: selected
+- Failure: not selected
+
+this records changes to domain computer accounts, such as their creation or deletion.
+
+configure `Audit Security Group Management`:
+- Configure the following audit events: selected
+- Success: selected
+- Failure: not selected
+
+this records changes to domain security groups, including membership changes.
+
+configure `Audit User Account Management`:
+- Configure the following audit events: selected
+- Success: selected
+- Failure: not selected
+
+this records changes to domain user accounts, supporting investigation of account changes during the lab scenarios.
+
+
+for `DS Access`:
+
+configure `Audit Directory Service Access`:
+- Configure the following audit events: selected
+- Success: selected
+- Failure: not selected
+
+this records access to active directory objects when those objects are also configured to audit the corresponding actions. it does not automatically record every directory access.
+
+
+for `Logon/Logoff`:
+
+configure `Audit Account Lockout`:
+- Configure the following audit events: selected
+- Success: not selected
+- Failure: selected
+
+this records failed sign-in attempts made while an account is already locked out.
+
+configure `Audit Logoff`:
+- Configure the following audit events: selected
+- Success: selected
+- Failure: not selected
+
+this records logon sessions ending on `DC01`.
+
+configure `Audit Logon`:
+- Configure the following audit events: selected
+- Success: selected
+- Failure: selected
+
+this records successful and failed logon attempts on `DC01`.
+
+configure `Audit Network Policy Server`:
+- Configure the following audit events: selected
+- Success: selected
+- Failure: selected
+
+this records network-access decisions when the network policy server role is used. the setting is retained from the previous baseline. nps is not part of the current scenario plan.
+
+configure `Audit Special Logon`:
+- Configure the following audit events: selected
+- Success: selected
+- Failure: not selected
+
+this records sensitive privileges assigned to new logon sessions. the event alone does not prove those privileges were used.
+
+
+for `Policy Change`:
+
+configure `Audit Audit Policy Change`:
+- Configure the following audit events: selected
+- Success: selected
+- Failure: not selected
+
+this preserves auditing of changes to auditing policy.
+
+configure `Audit Authentication Policy Change`:
+- Configure the following audit events: selected
+- Success: selected
+- Failure: not selected
+
+this records changes to authentication policy.
+
+
+for `System`:
+
+configure `Audit Other System Events`:
+- Configure the following audit events: selected
+- Success: selected
+- Failure: selected
+
+this records miscellaneous security-related system events.
+
+configure `Audit Security State Change`:
+- Configure the following audit events: selected
+- Success: selected
+- Failure: not selected
+
+this records events such as windows startup, shutdown, and system-time changes.
+
+configure `Audit System Integrity`:
+- Configure the following audit events: selected
+- Success: selected
+- Failure: selected
+
+this records system-integrity events, including detected integrity violations.
+
+navigate to:
+Computer Configuration
+->	Policies
+	->	Windows Settings
+		->	Security Settings
+			->	Local Policies
+				->	Security Options
+
+configure `Audit: Force audit policy subcategory settings (Windows Vista or later) to override audit policy category settings`:
+- Define this policy setting: selected
+- Enabled: selected
+
+this gives detailed audit subcategory settings priority over the older, broad audit category settings.
+
+give `Authenticated Users` permission to read the gpo, replacing its default permission to apply it:
+```
+PS C:\Users\Administrator> Set-GPPermission -Name "PSL-DC01-Auditing" -TargetName "Authenticated Users" -TargetType Group -PermissionLevel GpoRead -Replace
+
+
+DisplayName      : PSL-DC01-Auditing
+DomainName       : ad.pearsonspecterlitt.com
+Owner            : PSL\Domain Admins
+Id               : c72ff3e6-bddf-4c54-a7cc-91ed6ee73de3
+GpoStatus        : AllSettingsEnabled
+Description      : Audit policy for DC01 controlled lab scenarios
+CreationTime     : 9/8/2026 6:43:30 PM
+ModificationTime : 9/8/2026 6:59:56 PM
+UserVersion      : AD Version: 0, SysVol Version: 0
+ComputerVersion  : AD Version: 20, SysVol Version: 20
+WmiFilter        :
+```
+
+allow `DC01`'s computer account to apply it:
+```
+PS C:\Users\Administrator> Set-GPPermission -Name "PSL-DC01-Auditing" -TargetName "DC01" -TargetType Computer -PermissionLevel GpoApply
+
+
+DisplayName      : PSL-DC01-Auditing
+DomainName       : ad.pearsonspecterlitt.com
+Owner            : PSL\Domain Admins
+Id               : c72ff3e6-bddf-4c54-a7cc-91ed6ee73de3
+GpoStatus        : AllSettingsEnabled
+Description      : Audit policy for DC01 controlled lab scenarios
+CreationTime     : 9/8/2026 6:43:30 PM
+ModificationTime : 9/8/2026 7:01:56 PM
+UserVersion      : AD Version: 0, SysVol Version: 0
+ComputerVersion  : AD Version: 20, SysVol Version: 20
+WmiFilter        :
+```
+
+verify:
+```
+PS C:\Users\Administrator> Get-GPPermission -Name "PSL-DC01-Auditing" -All | Select-Object @{Name="Trustee";Expression={$_.Trustee.Name}},Permission,Inherited | Format-Table -AutoSize
+
+Trustee                                        Permission Inherited
+-------                                        ---------- ---------
+DC01$                                            GpoApply     False
+Domain Admins                 GpoEditDeleteModifySecurity     False
+Enterprise Admins             GpoEditDeleteModifySecurity     False
+Authenticated Users                               GpoRead     False
+ENTERPRISE DOMAIN CONTROLLERS                     GpoRead     False
+SYSTEM                        GpoEditDeleteModifySecurity     False
+```
+`DC01$` is the computer account and it has `GpoApply`
+`Authenticated Users` has `GpoRead`
+
+link the gpo to `Domain Controllers` ou:
+```
+PS C:\Users\Administrator> New-GPLink -Name "PSL-DC01-Auditing" -Target "OU=Domain Controllers,DC=ad,DC=pearsonspecterlitt,DC=com" -LinkEnabled Yes
+
+
+GpoId       : c72ff3e6-bddf-4c54-a7cc-91ed6ee73de3
+DisplayName : PSL-DC01-Auditing
+Enabled     : True
+Enforced    : False
+Target      : OU=Domain Controllers,DC=ad,DC=pearsonspecterlitt,DC=com
+Order       : 2
+```
+
+refresh `DC01`'s computer policies instead of waiting for the scheduled refresh:
+```
+PS C:\Users\Administrator> gpupdate /Target:Computer /Force
+Updating policy...
+
+Computer Policy update has completed successfully.
+```
+
+verify which gpos applied:
+```
+PS C:\Users\Administrator> gpresult /Scope Computer /R
+
+Microsoft (R) Windows (R) Operating System Group Policy Result tool v2.0
+© Microsoft Corporation. All rights reserved.
+
+Created on ‎9/‎8/‎2026 at 7:06:09 PM
+
+
+RSOP data for  on DC01 : Logging Mode
+--------------------------------------
+
+OS Configuration:            Primary Domain Controller
+OS Version:                  10.0.26100
+Site Name:                   Default-First-Site-Name
+Roaming Profile:
+Local Profile:
+Connected over a slow link?: No
+
+
+COMPUTER SETTINGS
+------------------
+    CN=DC01,OU=Domain Controllers,DC=ad,DC=pearsonspecterlitt,DC=com
+    Last time Group Policy was applied: 9/8/2026 at 7:05:22 PM
+    Group Policy was applied from:      DC01.ad.pearsonspecterlitt.com
+    Group Policy slow link threshold:   500 kbps
+    Domain Name:                        PSL
+    Domain Type:                        Windows 2008 or later
+
+    Applied Group Policy Objects
+    -----------------------------
+        Default Domain Controllers Policy
+        PSL-DC01-Auditing
+        Default Domain Policy
+
+    The following GPOs were not applied because they were filtered out
+    -------------------------------------------------------------------
+        Local Group Policy
+            Filtering:  Not Applied (Empty)
+
+    The computer is a part of the following security groups
+    -------------------------------------------------------
+        BUILTIN\Administrators
+        Everyone
+        BUILTIN\Users
+        BUILTIN\Pre-Windows 2000 Compatible Access
+        Windows Authorization Access Group
+        NT AUTHORITY\NETWORK
+        NT AUTHORITY\Authenticated Users
+        This Organization
+        DC01$
+        Domain Controllers
+        NT AUTHORITY\ENTERPRISE DOMAIN CONTROLLERS
+        Authentication authority asserted identity
+        Denied RODC Password Replication Group
+        System Mandatory Level
+```
+
+inspect the effective audit settings:
+```
+PS C:\Users\Administrator> auditpol /get /category:*
+System audit policy
+Category/Subcategory                      Setting
+System
+  Security System Extension               No Auditing
+  System Integrity                        Success and Failure
+  IPsec Driver                            No Auditing
+  Other System Events                     Success and Failure
+  Security State Change                   Success
+Logon/Logoff
+  Logon                                   Success and Failure
+  Logoff                                  Success
+  Account Lockout                         Failure
+  IPsec Main Mode                         No Auditing
+  IPsec Quick Mode                        No Auditing
+  IPsec Extended Mode                     No Auditing
+  Special Logon                           Success
+  Other Logon/Logoff Events               No Auditing
+  Network Policy Server                   Success and Failure
+  User / Device Claims                    No Auditing
+  Group Membership                        No Auditing
+  Access Rights                           No Auditing
+Object Access
+  File System                             No Auditing
+  Registry                                No Auditing
+  Kernel Object                           No Auditing
+  SAM                                     No Auditing
+  Certification Services                  No Auditing
+  Application Generated                   No Auditing
+  Handle Manipulation                     No Auditing
+  File Share                              No Auditing
+  Filtering Platform Packet Drop          No Auditing
+  Filtering Platform Connection           No Auditing
+  Other Object Access Events              No Auditing
+  Detailed File Share                     No Auditing
+  Removable Storage                       No Auditing
+  Central Policy Staging                  No Auditing
+Privilege Use
+  Non Sensitive Privilege Use             No Auditing
+  Other Privilege Use Events              No Auditing
+  Sensitive Privilege Use                 No Auditing
+Detailed Tracking
+  Process Creation                        No Auditing
+  Process Termination                     No Auditing
+  DPAPI Activity                          No Auditing
+  RPC Events                              No Auditing
+  Plug and Play Events                    No Auditing
+  Token Right Adjusted Events             No Auditing
+Policy Change
+  Audit Policy Change                     Success
+  Authentication Policy Change            Success
+  Authorization Policy Change             No Auditing
+  MPSSVC Rule-Level Policy Change         No Auditing
+  Filtering Platform Policy Change        No Auditing
+  Other Policy Change Events              No Auditing
+Account Management
+  Computer Account Management             Success
+  Security Group Management               Success
+  Distribution Group Management           No Auditing
+  Application Group Management            No Auditing
+  Other Account Management Events         No Auditing
+  User Account Management                 Success
+DS Access
+  Directory Service Access                Success
+  Directory Service Changes               No Auditing
+  Directory Service Replication           No Auditing
+  Detailed Directory Service Replication  No Auditing
+Account Logon
+  Kerberos Service Ticket Operations      Success
+  Other Account Logon Events              No Auditing
+  Kerberos Authentication Service         Success and Failure
+  Credential Validation                   Success and Failure
+```
+
+check if the override switch is now enabled:
+```
+PS C:\Users\Administrator> Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa" -Name "SCENoApplyLegacyAuditPolicy" | Select-Object SCENoApplyLegacyAuditPolicy
+
+scenoapplylegacyauditpolicy
+---------------------------
+                          1
+```
+it returned `1` which means its enabled, `0` means disabled, and it also didn't throw us an error message.
+
+what's next:
+1. perform a fresh domain sign-in on `WS01` and verify the corresponding successful kerberos authentication event `4768` on `DC01`
