@@ -1,0 +1,281 @@
+2026-09-09: DC01 authentication audit validation and WS01 SMB share scenario preparation
+
+power on `DC01`.
+
+sign in as `PSL\kbennett` in `WS01` and confirm:
+```WS01
+PS C:\Users\kbennett> whoami
+psl\kbennett
+```
+
+search the last 15 minutes of `DC01`'s Security log and display the newest event `4768` containing `kbennett`:
+```
+PS C:\Users\Administrator> Get-WinEvent -FilterHashtable @{LogName="Security";Id=4768;StartTime=(Get-Date).AddMinutes(-15)} | Where-Object {$_.Message -match '\bkbennett\b'} | Select-Object -First 1 TimeCreated,Id,RecordId,MachineName,Message | Format-List
+
+
+TimeCreated : 9/9/2026 9:17:01 AM
+Id          : 4768
+RecordId    : 69728
+MachineName : DC01.ad.pearsonspecterlitt.com
+Message     : A Kerberos authentication ticket (TGT) was requested.
+
+              Account Information:
+                Account Name:           kbennett
+                Supplied Realm Name:    PSL
+                User ID:                        S-1-5-21-1881315258-3822834566-1441680494-1106
+                MSDS-SupportedEncryptionTypes:  0x0 (N/A)
+                Available Keys: RC4, AES128-SHA96, AES256-SHA96, AES128-SHA256, AES256-SHA384
+
+              Service Information:
+                Service Name:           krbtgt
+                Service ID:             S-1-5-21-1881315258-3822834566-1441680494-502
+                MSDS-SupportedEncryptionTypes:  0x0 (N/A)
+                Available Keys: RC4, AES128-SHA96, AES256-SHA96
+
+              Domain Controller Information:
+                MSDS-SupportedEncryptionTypes:  0x0 (N/A)
+                Available Keys: RC4, AES128-SHA96, AES256-SHA96
+
+              Network Information:
+                Client Address:         ::ffff:192.168.190.128
+                Client Port:            49716
+                Advertized Etypes:
+                        AES256-CTS-HMAC-SHA1-96
+                        AES128-CTS-HMAC-SHA1-96
+                        RC4-HMAC-NT
+                        DES-CBC-MD5
+
+              Additional Information:
+                Ticket Options:         0x40810010
+                Result Code:            0x0
+                Ticket Encryption Type: 0x12
+                Session Encryption Type:        0x12
+                Pre-Authentication Type:        2
+                Pre-Authentication EncryptionType:      0x12
+
+              Certificate Information:
+                Certificate Issuer Name:
+                Certificate Serial Number:
+                Certificate Thumbprint:
+
+              Ticket information
+                Response ticket hash:           wDT0YtCtwyxRh+GD7RYU4nE6FAfn/FM+lL3z5IrxurI=
+
+              Certificate information is only provided if a certificate was used for pre-authentication.
+
+              Pre-authentication types, ticket options, encryption types and result codes are defined in RFC 4120.
+```
+the successful authentication audit test passed.
+the event identifies `kbennett`'s domain account.
+`Result Code` is `0x0` which means `DC01` successfully issued the initial kerberos ticket.
+`Client Address` is `::ffff:192.168.190.128`, `WS01`'s last recorded address.
+`TimeCreated` is `9/9/2026 9:17:01 AM` which is the event's timestamp in the vm.
+
+sign in as `.\ws01-admin` in `WS01` and confirm its current address so it matches to the event and use the correct address during the scenario:
+```WS01
+PS C:\WINDOWS\system32> Get-NetIPAddress -InterfaceIndex 6 -AddressFamily IPv4 | Select-Object InterfaceAlias,IPAddress
+
+InterfaceAlias IPAddress
+-------------- ---------
+Ethernet0      192.168.190.128
+```
+
+list the network shares configured on `WS01`:
+```WS01
+PS C:\WINDOWS\system32> Get-SmbShare | Select-Object Name,Path,Description
+
+Name   Path       Description
+----   ----       -----------
+ADMIN$ C:\WINDOWS Remote Admin
+C$     C:\        Default share
+IPC$              Remote IPC
+```
+the shares shown are:
+1. admin access to the `Windows` folder.
+2. admin access to the `C:` drive.
+3. windows network communication through `IPC$`, which has no disk-folder path.
+The scenario will use a separate share containing mock confidential files. The intended problem is that an ordinary user outside the authorized group can read those files.
+
+before setting permissions, identify existing security groups stored in ous:
+```
+PS C:\Users\Administrator> Get-ADGroup -Filter 'GroupCategory -eq "Security"' | Where-Object {$_.DistinguishedName -like "*,OU=*"} | Sort-Object Name | Select-Object Name,GroupScope
+
+Name                GroupScope
+----                ----------
+GG-PSL-User-Support     Global
+```
+
+mock support-team share using the existing group:
+
+| Role                | Proposed account/group                         |
+| ------------------  | ---------------------------------------------- |
+| Authorized readers  | `GG-PSL-User-Support` members                  |
+| Unauthorized reader | `kbennett`, provided she is outside that group |
+| Deliberate mistake  | Granting `Domain Users` read access            |
+
+list the group members of `GG-PSL-User-Support`:
+```
+PS C:\Users\Administrator> Get-ADGroupMember -Identity "GG-PSL-User-Support" -Recursive | Select-Object Name,SamAccountName,ObjectClass
+
+Name           SamAccountName ObjectClass
+----           -------------- -----------
+Benjamin Admin benjamin-admin user
+```
+
+create the folder that will hold the mock confidential file:
+```WS01
+PS C:\WINDOWS\system32> whoami
+ws01\ws01-admin
+PS C:\WINDOWS\system32> New-Item -Path "C:\LabShares" -ItemType Directory -Force | Out-Null
+PS C:\WINDOWS\system32> New-Item -Path "C:\LabShares\PSL-Support-Private" -ItemType Directory -ErrorAction Stop
+
+
+    Directory: C:\LabShares
+
+
+Mode                 LastWriteTime         Length Name
+----                 -------------         ------ ----
+d-----          9/9/2026   9:59 AM                PSL-Support-Private
+```
+
+create a mock confidential text file:
+```WS01
+PS C:\WINDOWS\system32> New-Item -Path "C:\LabShares\PSL-Support-Private\mock-confidential.txt" -ItemType File -Value "CTF{SMB0dy_l3ft_th3_d00r_0p3n}" -ErrorAction Stop
+
+
+    Directory: C:\LabShares\PSL-Support-Private
+
+
+Mode                 LastWriteTime         Length Name
+----                 -------------         ------ ----
+-a----          9/9/2026  10:29 AM             30 mock-confidential.txt
+```
+
+inspect the folder `PSL-Support-Private`'s existing permissions (ACL):
+```WS01
+PS C:\WINDOWS\system32> Get-Acl -Path "C:\LabShares\PSL-Support-Private" | Format-List Owner,AreAccessRulesProtected,AccessToString
+
+
+Owner                   : BUILTIN\Administrators
+AreAccessRulesProtected : False
+AccessToString          : BUILTIN\Administrators Allow  FullControl
+                          NT AUTHORITY\SYSTEM Allow  FullControl
+                          BUILTIN\Users Allow  ReadAndExecute, Synchronize
+                          NT AUTHORITY\Authenticated Users Allow  Modify, Synchronize
+                          NT AUTHORITY\Authenticated Users Allow  -536805376
+```
+
+check if `KALI01` has `smbclient`:
+```KALI01
+┌──(jerry㉿kali01)-[~]
+└─$ smbclient --version
+Command 'smbclient' not found, but can be installed with:
+sudo apt install smbclient
+Do you want to install it? (N/y)
+```
+`KALI01`’s current host-only network cannot download internet packages.
+decline the installation for now.
+
+confirm `KALI01` network configuration:
+```KALI01
+┌──(jerry㉿kali01)-[~]
+└─$ nmcli            
+eth0: connected to Wired connection 1
+        "Intel 82545EM"
+        ethernet (e1000), 00:0C:29:C7:E5:84, hw, mtu 1500
+        inet4 192.168.190.11/24
+        route4 192.168.190.0/24 metric 100
+        inet6 fe80::20c:29ff:fec7:e584/64
+        route6 fe80::/64 metric 1024
+
+lo: connected (externally) to lo
+        "lo"
+        loopback (unknown), 00:00:00:00:00:00, sw, mtu 65536
+        inet4 127.0.0.1/8
+        inet6 ::1/128
+
+DNS configuration:
+        servers: 192.168.190.10
+        interface: eth0
+
+Use "nmcli device show" to get complete information about known devices and
+"nmcli connection show" to get an overview on active connection profiles.
+
+Consult nmcli(1) and nmcli-examples(7) manual pages for complete usage details.
+```
+there is no listed gateway for an internet route.
+`KALI01` still has its isolated configuration.
+
+create a NAT maintenance profile:
+```KALI01
+┌──(jerry㉿kali01)-[~]
+└─$ sudo nmcli connection add type ethernet ifname eth0 con-name "KALI01-NAT-Maintenance" ipv4.method auto connection.autoconnect no
+[sudo] password for jerry: 
+Connection 'KALI01-NAT-Maintenance' (6a996ffa-3a48-4712-9b01-963c302d4315) successfully added.
+```
+it uses dhcp for its address, gateway, and dns. automatic activation is disabled.
+
+in vmware, open `KALI01`'s vm settings and change the network adapter to `VMNet8 (NAT)`.
+
+activate the maintenance profile:
+```KALI01
+┌──(jerry㉿kali01)-[~]
+└─$ sudo nmcli connection up "KALI01-NAT-Maintenance"
+Connection successfully activated (D-Bus active path: /org/freedesktop/NetworkManager/ActiveConnection/5)
+```
+
+install `smbclient`:
+```KALI01
+┌──(jerry㉿kali01)-[~]
+└─$ sudo apt install smbclient
+```
+verify:
+```KALI01
+┌──(jerry㉿kali01)-[~]
+└─$ smbclient --version
+Version 4.24.6-Debian-4.24.6+dfsg-1
+```
+
+in vmware, open `KALI01`'s vm settings and change the network adapter to `VMNet1 (Host-only)`.
+
+restore the isolated connection:
+```KALI01
+┌──(jerry㉿kali01)-[~]
+└─$ sudo nmcli connection up "Wired connection 1"
+[sudo] password for jerry: 
+Connection successfully activated (D-Bus active path: /org/freedesktop/NetworkManager/ActiveConnection/3)
+```
+verify:
+```KALI01
+┌──(jerry㉿kali01)-[~]
+└─$ nmcli            
+eth0: connected to Wired connection 1
+        "Intel 82545EM"
+        ethernet (e1000), 00:0C:29:C7:E5:84, hw, mtu 1500
+        inet4 192.168.190.11/24
+        route4 192.168.190.0/24 metric 100
+        inet6 fe80::20c:29ff:fec7:e584/64
+        route6 fe80::/64 metric 1024
+
+lo: connected (externally) to lo
+        "lo"
+        loopback (unknown), 00:00:00:00:00:00, sw, mtu 65536
+        inet4 127.0.0.1/8
+        inet6 ::1/128
+
+DNS configuration:
+        servers: 192.168.190.10
+        interface: eth0
+
+Use "nmcli device show" to get complete information about known devices and
+"nmcli connection show" to get an overview on active connection profiles.
+
+Consult nmcli(1) and nmcli-examples(7) manual pages for complete usage details.
+                                                                                                    
+┌──(jerry㉿kali01)-[~]
+└─$ ping 8.8.8.8            
+ping: connect: Network is unreachable
+```
+
+what's next:
+1. create the `PSL-Support-Private` SMB share on `WS01` and configure its NTFS and share permissions to deliberately allow `Domain Users` to read the mock file
