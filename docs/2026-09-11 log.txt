@@ -1,0 +1,330 @@
+2026-09-11: WS01 SMB share exposure validation and remediation
+
+Windows permissions:
+| Code | Meaning           | Plain explanation                                                          |
+| ---- | ----------------- | -------------------------------------------------------------------------- |
+| `I`  | Inherited         | This permission came from the parent folder.                               |
+| `OI` | Object inherit    | Files inside inherit this permission.                                      |
+| `CI` | Container inherit | Subfolders inherit this permission.                                        |
+| `IO` | Inherit only      | Applies to contents, **not the folder carrying this rule**.                |
+| `F`  | Full control      | Read, change, delete, and manage permissions.                              |
+| `RX` | Read and execute  | Read files, run programs, and move through folders.                        |
+| `M`  | Modify            | Read, change, and delete files, without full permission-management rights. |
+
+power on windows server `DC01`.
+
+inspect permissions on the target folder and its contents:
+```WS01
+PS C:\WINDOWS\system32> icacls "C:\LabShares\PSL-Support-Private" /T
+C:\LabShares\PSL-Support-Private BUILTIN\Administrators:(I)(OI)(CI)(F)
+                                 NT AUTHORITY\SYSTEM:(I)(OI)(CI)(F)
+                                 BUILTIN\Users:(I)(OI)(CI)(RX)
+                                 NT AUTHORITY\Authenticated Users:(I)(M)
+                                 NT AUTHORITY\Authenticated Users:(I)(OI)(CI)(IO)(M)
+
+C:\LabShares\PSL-Support-Private\mock-confidential.txt BUILTIN\Administrators:(I)(F)
+                                                       NT AUTHORITY\SYSTEM:(I)(F)
+                                                       BUILTIN\Users:(I)(RX)
+                                                       NT AUTHORITY\Authenticated Users:(I)(M)
+
+Successfully processed 2 files; Failed processing 0 files
+```
+every permission is `Inherited (I)`.
+`Authenticated Users` inherits `Modify (M)` permission.
+
+replace/set explicit allow permissions for these accounts/groups:
+```WS01
+PS C:\WINDOWS\system32> icacls "C:\LabShares\PSL-Support-Private" /grant:r "BUILTIN\Administrators:(OI)(CI)F" "NT AUTHORITY\SYSTEM:(OI)(CI)F" "PSL\GG-PSL-User-Support:(OI)(CI)RX" "PSL\Domain Users:(OI)(CI)RX"
+processed file: C:\LabShares\PSL-Support-Private
+Successfully processed 1 files; Failed processing 0 files
+```
+notice how `PSL\Domain Users` has `Read and Execute (RX)` permissions, it shouldn't have that. This includes `kbennett` who is outside `GG-PSL-User-Support`.
+this is the deliberate mistake: an ordinary employee can read a file intended for support staff.
+later, this will be removed and verify that `kbennett` is blocked while `benjamin-admin` can still read it.
+
+remove the inherited rules from this folder:
+```WS01
+PS C:\WINDOWS\system32> icacls "C:\LabShares\PSL-Support-Private" /inheritancelevel:r
+processed file: C:\LabShares\PSL-Support-Private
+Successfully processed 1 files; Failed processing 0 files
+```
+explicit permissions still remain.
+
+verify the folder and mock file inside that folder:
+```WS01
+PS C:\WINDOWS\system32> icacls "C:\LabShares\PSL-Support-Private" /T
+C:\LabShares\PSL-Support-Private PSL\Domain Users:(OI)(CI)(RX)
+                                 PSL\GG-PSL-User-Support:(OI)(CI)(RX)
+                                 NT AUTHORITY\SYSTEM:(OI)(CI)(F)
+                                 BUILTIN\Administrators:(OI)(CI)(F)
+
+C:\LabShares\PSL-Support-Private\mock-confidential.txt PSL\Domain Users:(I)(RX)
+                                                       PSL\GG-PSL-User-Support:(I)(RX)
+                                                       NT AUTHORITY\SYSTEM:(I)(F)
+                                                       BUILTIN\Administrators:(I)(F)
+
+Successfully processed 2 files; Failed processing 0 files
+```
+
+create a share for `PSL-Support-Private`:
+```WS01
+PS C:\WINDOWS\system32> New-SmbShare -Name "PSL-Support-Private" -Path "C:\LabShares\PSL-Support-Private" -FullAccess "BUILTIN\Administrators" -ReadAccess "PSL\GG-PSL-User-Support","PSL\Domain Users" -ErrorAction Stop
+
+Name                ScopeName Path                             Description
+----                --------- ----                             -----------
+PSL-Support-Private *         C:\LabShares\PSL-Support-Private
+```
+Administrators receive full share access.
+`PSL\GG-PSL-User-Support` and "PSL\Domain Users" receive read access.
+
+verify the share permissions:
+```WS01
+PS C:\WINDOWS\system32> Get-SmbShareAccess -Name "PSL-Support-Private" | Select-Object AccountName,AccessControlType,AccessRight
+
+AccountName             AccessControlType AccessRight
+-----------             ----------------- -----------
+BUILTIN\Administrators              Allow        Full
+PSL\GG-PSL-User-Support             Allow        Read
+PSL\Domain Users                    Allow        Read
+```
+
+test access using Katrina's account `PSL\kbennett`:
+```KALI01
+┌──(jerry㉿kali01)-[~]
+└─$ smbclient "//WS01.ad.pearsonspecterlitt.com/PSL-Support-Private" -U "PSL/kbennett"
+Password for [PSL\kbennett]:
+Try "help" to get a list of possible commands.
+smb: \> 
+```
+this contacts `WS01`, where the folder lives, and uses the account specified by `-U`.
+
+retrieve the mock file and open it for viewing:
+```KALI01
+smb: \> more mock-confidential.txt
+
+CTF{SMB0dy_l3ft_th3_d00r_0p3n}
+/tmp/smbmore.LfjBMw (END)
+```
+this proves Katrina, a domain user, can read the support file’s contents.
+
+close the connection:
+```KALI01
+smb: \> exit
+```
+
+collect event `5145`, the newest in the last 30 minutes. it records the share permission check, the requesting account, source address, and target file:
+```WS01
+PS C:\WINDOWS\system32> Get-WinEvent -FilterHashtable @{LogName="Security";Id=5145;StartTime=(Get-Date).AddMinutes(-30)} | Where-Object {$_.Message -match '\bkbennett\b' -and $_.Message -like "*mock-confidential.txt*"} | Select-Object -First 1 TimeCreated,Id,RecordId,MachineName,KeywordsDisplayNames,Message | Format-List
+
+
+TimeCreated          : 9/11/2026 4:21:23 PM
+Id                   : 5145
+RecordId             : 35265
+MachineName          : WS01.ad.pearsonspecterlitt.com
+KeywordsDisplayNames : {Audit Success}
+Message              : A network share object was checked to see whether client can be granted desired access.
+
+                       Subject:
+                        Security ID:            S-1-5-21-1881315258-3822834566-1441680494-1106
+                        Account Name:           kbennett
+                        Account Domain:         PSL
+                        Logon ID:               0x23E3C6
+
+                       Network Information:
+                        Object Type:            File
+                        Source Address:         192.168.190.11
+                        Source Port:            39104
+
+                       Share Information:
+                        Share Name:             \\*\PSL-Support-Private
+                        Share Path:             \??\C:\LabShares\PSL-Support-Private
+                        Relative Target Name:   mock-confidential.txt
+
+                       Access Request Information:
+                        Access Mask:            0x120089
+                        Accesses:               READ_CONTROL
+                                                SYNCHRONIZE
+                                                ReadData (or ListDirectory)
+                                                ReadEA
+                                                ReadAttributes
+
+                       Access Check Results:
+                        READ_CONTROL:   Granted by      D:(A;;0x1200a9;;;S-1-5-21-1881315258-3822834566-1441680494-513)
+                                                SYNCHRONIZE:    Granted by      D:(A;;0x1200a9;;;S-1-5-21-1881315258-3822834566-1441680494-513)
+                                                ReadData (or ListDirectory):    Granted by      D:(A;;0x1200a9;;;S-1-5-21-1881315258-3822834566-1441680494-513)
+                                                ReadEA: Granted by      D:(A;;0x1200a9;;;S-1-5-21-1881315258-3822834566-1441680494-513)
+                                                ReadAttributes: Granted by      D:(A;;0x1200a9;;;S-1-5-21-1881315258-3822834566-1441680494-513)
+```
+account name is `kbennett`.
+source address is `192.168.190.11` which is `KALI01`.
+relative target name or file is `mock-confidential.txt`.
+accesses include `ReadData`.
+granted by an sid ending in `-513` identifies Domain Users.
+
+find the matching successful logon event `4624` from the last hour:
+```WS01
+PS C:\WINDOWS\system32> Get-WinEvent -FilterHashtable @{LogName="Security";Id=4624;StartTime=(Get-Date).AddHours(-1)} | Where-Object {$_.Message -match '\bkbennett\b' -and $_.Message -match '\b0x23E3C6\b'} | Select-Object -First 1 TimeCreated,Id,RecordId,MachineName,Message | Format-List
+
+
+TimeCreated : 9/11/2026 4:15:21 PM
+Id          : 4624
+RecordId    : 35211
+MachineName : WS01.ad.pearsonspecterlitt.com
+Message     : An account was successfully logged on.
+
+              Subject:
+                Security ID:            S-1-0-0
+                Account Name:           -
+                Account Domain:         -
+                Logon ID:               0x0
+
+              Logon Information:
+                Logon Type:             3
+                Restricted Admin Mode:  -
+                Remote Credential Guard:        -
+                Virtual Account:                No
+                Elevated Token:         No
+
+              Impersonation Level:              Impersonation
+
+              New Logon:
+                Security ID:            S-1-5-21-1881315258-3822834566-1441680494-1106
+                Account Name:           kbennett
+                Account Domain:         PSL
+                Logon ID:               0x23E3C6
+                Linked Logon ID:                0x0
+                Network Account Name:   -
+                Network Account Domain: -
+                Logon GUID:             {00000000-0000-0000-0000-000000000000}
+
+              Process Information:
+                Process ID:             0x0
+                Process Name:           -
+
+              Network Information:
+                Workstation Name:       KALI01
+                Source Network Address: 192.168.190.11
+                Source Port:            39104
+
+              Detailed Authentication Information:
+                Logon Process:          NtLmSsp
+                Authentication Package: NTLM
+                Transited Services:     -
+                Package Name (NTLM only):       NTLM V2
+                Key Length:             128
+
+              This event is generated when a logon session is created. It is generated on the computer that was accessed.
+
+              The subject fields indicate the account on the local system which requested the logon. This is most commonly a service
+              such as the Server service, or a local process such as Winlogon.exe or Services.exe.
+
+              The logon type field indicates the kind of logon that occurred. The most common types are 2 (interactive) and 3 (network).
+
+              The New Logon fields indicate the account for whom the new logon was created, i.e. the account that was logged on.
+
+              The network fields indicate where a remote logon request originated. Workstation name is not always available and may be
+              left blank in some cases.
+
+              The impersonation level field indicates the extent to which a process in the logon session can impersonate.
+
+              The authentication information fields provide detailed information about this specific logon request.
+                - Logon GUID is a unique identifier that can be used to correlate this event with a KDC event.
+                - Transited services indicate which intermediate services have participated in this logon request.
+                - Package name indicates which sub-protocol was used among the NTLM protocols.
+                - Key length indicates the length of the generated session key. This will be 0 if no session key was requested.
+```
+
+both events have the same logon id `0x23E3C6` and the same source `192.168.190.11:39104`.
+
+remove `Domain Users` share permissions:
+```WS01
+PS C:\WINDOWS\system32> Revoke-SmbShareAccess -Name "PSL-Support-Private" -AccountName "PSL\Domain Users" -Force -ErrorAction Stop
+
+Name                ScopeName AccountName             AccessControlType AccessRight
+----                --------- -----------             ----------------- -----------
+PSL-Support-Private *         BUILTIN\Administrators  Allow             Full
+PSL-Support-Private *         PSL\GG-PSL-User-Support Allow             Read
+```
+
+remove `Domain Users` folder permissions:
+```WS01
+PS C:\WINDOWS\system32> icacls "C:\LabShares\PSL-Support-Private" /remove:g "PSL\Domain Users"
+processed file: C:\LabShares\PSL-Support-Private
+Successfully processed 1 files; Failed processing 0 files
+```
+
+verify the folder and file:
+```WS01
+PS C:\WINDOWS\system32> icacls "C:\LabShares\PSL-Support-Private" /T
+C:\LabShares\PSL-Support-Private PSL\GG-PSL-User-Support:(OI)(CI)(RX)
+                                 NT AUTHORITY\SYSTEM:(OI)(CI)(F)
+                                 BUILTIN\Administrators:(OI)(CI)(F)
+                                 WS01\ws01-admin:(OI)(CI)(F)
+
+C:\LabShares\PSL-Support-Private\mock-confidential.txt PSL\GG-PSL-User-Support:(I)(RX)
+                                                       NT AUTHORITY\SYSTEM:(I)(F)
+                                                       BUILTIN\Administrators:(I)(F)
+                                                       WS01\ws01-admin:(I)(F)
+```
+`PSL\Domain Users` is no longer here.
+note: the explicit full control entry for `WS01\ws01-admin` was added accidentally. the mock file inherits this permission from the folder.
+
+remove the accidental grant:
+```WS01
+PS C:\WINDOWS\system32> icacls "C:\LabShares\PSL-Support-Private" /remove:g "WS01\ws01-admin"
+processed file: C:\LabShares\PSL-Support-Private
+Successfully processed 1 files; Failed processing 0 files
+```
+verify:
+```WS01
+PS C:\WINDOWS\system32> icacls "C:\LabShares\PSL-Support-Private" /T
+C:\LabShares\PSL-Support-Private PSL\GG-PSL-User-Support:(OI)(CI)(RX)
+                                 NT AUTHORITY\SYSTEM:(OI)(CI)(F)
+                                 BUILTIN\Administrators:(OI)(CI)(F)
+
+C:\LabShares\PSL-Support-Private\mock-confidential.txt PSL\GG-PSL-User-Support:(I)(RX)
+                                                       NT AUTHORITY\SYSTEM:(I)(F)
+                                                       BUILTIN\Administrators:(I)(F)
+
+Successfully processed 2 files; Failed processing 0 files
+```
+
+retry `kbennett`'s connection:
+```KALI01
+┌──(jerry㉿kali01)-[~]
+└─$ smbclient "//WS01.ad.pearsonspecterlitt.com/PSL-Support-Private" -U "PSL/kbennett"
+Password for [PSL\kbennett]:
+Try "help" to get a list of possible commands.
+smb: \> more mock-confidential.txt
+NT_STATUS_ACCESS_DENIED opening remote file \mock-confidential.txt
+smb: \> ls
+NT_STATUS_ACCESS_DENIED listing \*
+```
+`kbennett` can connect to the share, but reading the mock file and listing its contents both return `NT_STATUS_ACCESS_DENIED`.
+
+use `benjamin-admin`'s credentials:
+```KALI01
+┌──(jerry㉿kali01)-[~]
+└─$ smbclient "//WS01.ad.pearsonspecterlitt.com/PSL-Support-Private" -U "PSL/benjamin-admin"
+Password for [PSL\benjamin-admin]:
+Try "help" to get a list of possible commands.
+smb: \> ls
+  .                                   D        0  Wed Sep  9 10:29:39 2026
+  ..                                  D        0  Wed Sep  9 09:59:43 2026
+  mock-confidential.txt               A       30  Wed Sep  9 10:29:39 2026
+
+                20696831 blocks of size 4096. 11807998 blocks available
+smb: \> more mock-confidential.txt
+
+CTF{SMB0dy_l3ft_th3_d00r_0p3n}
+/tmp/smbmore.JrQX7I (END)
+```
+this proves that the fix preserves access for the intended support user.
+
+close smb connection:
+```KALI01
+smb: \> exit
+```
+
+what's next:
+1. verify that `KALI01` has the tools needed for the AS-REP roasting scenario
