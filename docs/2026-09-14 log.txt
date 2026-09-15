@@ -1,0 +1,406 @@
+2026-09-14: WS01 excessive local-administrator rights scenario
+
+list local `Administrators` group:
+```WS01
+PS C:\WINDOWS\system32> Get-LocalGroupMember -Group "Administrators" | Select-Object Name,ObjectClass,PrincipalSource
+
+Name               ObjectClass PrincipalSource
+----               ----------- ---------------
+PSL\Domain Admins  Group       ActiveDirectory
+WS01\Administrator User                  Local
+WS01\ws01-admin    User                  Local
+```
+
+check if `WS01` audits security-group membership changes:
+```WS01
+PS C:\WINDOWS\system32> auditpol /get /subcategory:"Security Group Management"
+System audit policy
+Category/Subcategory                      Setting
+Account Management
+  Security Group Management               Success
+```
+
+we'll use `kbennett` for the test.
+
+on the domain controller, check her domain groups:
+```
+PS C:\Users\Administrator> Get-ADPrincipalGroupMembership -Identity "kbennett" | Select-Object Name
+
+Name
+----
+Domain Users
+```
+
+test her current access to `C$` on `KALI01`:
+```KALI01
+┌──(jerry㉿kali01)-[~]
+└─$ smbclient '//WS01.ad.pearsonspecterlitt.com/C$' -U 'PSL/kbennett' -c 'ls'
+Password for [PSL\kbennett]:
+tree connect failed: NT_STATUS_ACCESS_DENIED
+```
+
+give `kbennett` administrator rights on `WS01`:
+```WS01
+PS C:\WINDOWS\system32> Add-LocalGroupMember -Group "Administrators" -Member "PSL\kbennett" -ErrorAction Stop
+```
+
+collect event `4732`:
+```WS01
+PS C:\WINDOWS\system32> Get-WinEvent -FilterHashtable @{LogName="Security";Id=4732;StartTime=(Get-Date).AddMinutes(-15)} | Select-Object -First 1 TimeCreated,Id,RecordId,MachineName,KeywordsDisplayNames,Message | Format-List
+
+
+TimeCreated          : 9/14/2026 7:34:25 PM
+Id                   : 4732
+RecordId             : 36324
+MachineName          : WS01.ad.pearsonspecterlitt.com
+KeywordsDisplayNames : {Audit Success}
+Message              : A member was added to a security-enabled local group.
+
+                       Subject:
+                        Security ID:            S-1-5-21-812095790-3273921031-1418192876-1001
+                        Account Name:           ws01-admin
+                        Account Domain:         WS01
+                        Logon ID:               0x5A843
+
+                       Member:
+                        Security ID:            S-1-5-21-1881315258-3822834566-1441680494-1106
+                        Account Name:           -
+
+                       Group:
+                        Security ID:            S-1-5-32-544
+                        Group Name:             Administrators
+                        Group Domain:           Builtin
+
+                       Additional Information:
+                        Privileges:             -
+```
+
+look up this sid:
+```WS01
+PS C:\WINDOWS\system32> $memberSid = [System.Security.Principal.SecurityIdentifier]::new("S-1-5-21-1881315258-3822834566-1441680494-1106")
+PS C:\WINDOWS\system32> $memberSid.Translate([System.Security.Principal.NTAccount]).Value
+PSL\kbennett
+```
+
+repeat testing her current access to `C$` on `KALI01`:
+```KALI01
+┌──(jerry㉿kali01)-[~]
+└─$ smbclient '//WS01.ad.pearsonspecterlitt.com/C$' -U 'PSL/kbennett' -c 'ls'
+Password for [PSL\kbennett]:
+  $Recycle.Bin                      DHS        0  Mon Aug 31 16:24:24 2026
+  Documents and Settings          DHSrn        0  Fri Aug 28 20:36:16 2026
+  DumpStack.log.tmp                 AHS    12288  Mon Sep 14 19:23:41 2026
+  inetpub                             D        0  Fri Mar  6 15:54:12 2026
+  LabBackups                          D        0  Sun Sep  6 08:32:40 2026
+  LabShares                           D        0  Wed Sep  9 09:59:43 2026
+  pagefile.sys                      AHS 1476395008  Mon Sep 14 19:23:41 2026
+  PerfLogs                            D        0  Mon Apr  1 00:26:06 2024
+  Program Files                      DR        0  Fri Aug 28 19:35:08 2026
+  Program Files (x86)                DR        0  Fri Jul 31 16:56:00 2026
+  ProgramData                       DHn        0  Mon Sep  7 18:56:39 2026
+  Recovery                         DHSn        0  Fri Aug 28 20:47:51 2026
+  swapfile.sys                      AHS 16777216  Mon Sep 14 19:23:41 2026
+  System Volume Information         DHS        0  Fri Aug 28 20:00:00 2026
+  Users                              DR        0  Mon Aug 31 16:23:54 2026
+  Windows                             D        0  Sun Aug 30 19:32:15 2026
+
+                20696831 blocks of size 4096. 11804283 blocks available
+```
+
+collect events `4624`, successful logon, and `4672`, special privileges assigned to a new logon.
+```WS01
+PS C:\WINDOWS\system32> Get-WinEvent -FilterHashtable @{LogName="Security";Id=4624,4672;StartTime=(Get-Date).AddMinutes(-30)} | Where-Object {$_.Message -match '\bkbennett\b'} | Select-Object -First 4 TimeCreated,Id,RecordId,MachineName,Message | Format-List
+
+
+TimeCreated : 9/14/2026 7:36:00 PM
+Id          : 4624
+RecordId    : 36364
+MachineName : WS01.ad.pearsonspecterlitt.com
+Message     : An account was successfully logged on.
+
+              Subject:
+                Security ID:            S-1-0-0
+                Account Name:           -
+                Account Domain:         -
+                Logon ID:               0x0
+
+              Logon Information:
+                Logon Type:             3
+                Restricted Admin Mode:  -
+                Remote Credential Guard:        -
+                Virtual Account:                No
+                Elevated Token:         Yes
+
+              Impersonation Level:              Impersonation
+
+              New Logon:
+                Security ID:            S-1-5-21-1881315258-3822834566-1441680494-1106
+                Account Name:           kbennett
+                Account Domain:         PSL
+                Logon ID:               0x2935A8
+                Linked Logon ID:                0x0
+                Network Account Name:   -
+                Network Account Domain: -
+                Logon GUID:             {00000000-0000-0000-0000-000000000000}
+
+              Process Information:
+                Process ID:             0x0
+                Process Name:           -
+
+              Network Information:
+                Workstation Name:       KALI01
+                Source Network Address: 192.168.190.11
+                Source Port:            40334
+
+              Detailed Authentication Information:
+                Logon Process:          NtLmSsp
+                Authentication Package: NTLM
+                Transited Services:     -
+                Package Name (NTLM only):       NTLM V2
+                Key Length:             128
+
+              This event is generated when a logon session is created. It is generated on the computer that was accessed.
+
+              The subject fields indicate the account on the local system which requested the logon. This is most commonly a service
+              such as the Server service, or a local process such as Winlogon.exe or Services.exe.
+
+              The logon type field indicates the kind of logon that occurred. The most common types are 2 (interactive) and 3 (network).
+
+              The New Logon fields indicate the account for whom the new logon was created, i.e. the account that was logged on.
+
+              The network fields indicate where a remote logon request originated. Workstation name is not always available and may be
+              left blank in some cases.
+
+              The impersonation level field indicates the extent to which a process in the logon session can impersonate.
+
+              The authentication information fields provide detailed information about this specific logon request.
+                - Logon GUID is a unique identifier that can be used to correlate this event with a KDC event.
+                - Transited services indicate which intermediate services have participated in this logon request.
+                - Package name indicates which sub-protocol was used among the NTLM protocols.
+                - Key length indicates the length of the generated session key. This will be 0 if no session key was requested.
+
+TimeCreated : 9/14/2026 7:36:00 PM
+Id          : 4672
+RecordId    : 36363
+MachineName : WS01.ad.pearsonspecterlitt.com
+Message     : Special privileges assigned to new logon.
+
+              Subject:
+                Security ID:            S-1-5-21-1881315258-3822834566-1441680494-1106
+                Account Name:           kbennett
+                Account Domain:         PSL
+                Logon ID:               0x2935A8
+
+              Privileges:               SeSecurityPrivilege
+                                SeBackupPrivilege
+                                SeRestorePrivilege
+                                SeTakeOwnershipPrivilege
+                                SeDebugPrivilege
+                                SeSystemEnvironmentPrivilege
+                                SeLoadDriverPrivilege
+                                SeImpersonatePrivilege
+                                SeDelegateSessionUserImpersonatePrivilege
+
+TimeCreated : 9/14/2026 7:31:58 PM
+Id          : 4624
+RecordId    : 36235
+MachineName : WS01.ad.pearsonspecterlitt.com
+Message     : An account was successfully logged on.
+
+              Subject:
+                Security ID:            S-1-0-0
+                Account Name:           -
+                Account Domain:         -
+                Logon ID:               0x0
+
+              Logon Information:
+                Logon Type:             3
+                Restricted Admin Mode:  -
+                Remote Credential Guard:        -
+                Virtual Account:                No
+                Elevated Token:         No
+
+              Impersonation Level:              Impersonation
+
+              New Logon:
+                Security ID:            S-1-5-21-1881315258-3822834566-1441680494-1106
+                Account Name:           kbennett
+                Account Domain:         PSL
+                Logon ID:               0x1E4AB2
+                Linked Logon ID:                0x0
+                Network Account Name:   -
+                Network Account Domain: -
+                Logon GUID:             {00000000-0000-0000-0000-000000000000}
+
+              Process Information:
+                Process ID:             0x0
+                Process Name:           -
+
+              Network Information:
+                Workstation Name:       KALI01
+                Source Network Address: 192.168.190.11
+                Source Port:            37624
+
+              Detailed Authentication Information:
+                Logon Process:          NtLmSsp
+                Authentication Package: NTLM
+                Transited Services:     -
+                Package Name (NTLM only):       NTLM V2
+                Key Length:             128
+
+              This event is generated when a logon session is created. It is generated on the computer that was accessed.
+
+              The subject fields indicate the account on the local system which requested the logon. This is most commonly a service
+              such as the Server service, or a local process such as Winlogon.exe or Services.exe.
+
+              The logon type field indicates the kind of logon that occurred. The most common types are 2 (interactive) and 3 (network).
+
+              The New Logon fields indicate the account for whom the new logon was created, i.e. the account that was logged on.
+
+              The network fields indicate where a remote logon request originated. Workstation name is not always available and may be
+              left blank in some cases.
+
+              The impersonation level field indicates the extent to which a process in the logon session can impersonate.
+
+              The authentication information fields provide detailed information about this specific logon request.
+                - Logon GUID is a unique identifier that can be used to correlate this event with a KDC event.
+                - Transited services indicate which intermediate services have participated in this logon request.
+                - Package name indicates which sub-protocol was used among the NTLM protocols.
+                - Key length indicates the length of the generated session key. This will be 0 if no session key was requested.
+
+TimeCreated : 9/14/2026 7:31:41 PM
+Id          : 4624
+RecordId    : 36200
+MachineName : WS01.ad.pearsonspecterlitt.com
+Message     : An account was successfully logged on.
+
+              Subject:
+                Security ID:            S-1-0-0
+                Account Name:           -
+                Account Domain:         -
+                Logon ID:               0x0
+
+              Logon Information:
+                Logon Type:             3
+                Restricted Admin Mode:  -
+                Remote Credential Guard:        -
+                Virtual Account:                No
+                Elevated Token:         No
+
+              Impersonation Level:              Impersonation
+
+              New Logon:
+                Security ID:            S-1-5-21-1881315258-3822834566-1441680494-1106
+                Account Name:           kbennett
+                Account Domain:         PSL
+                Logon ID:               0x1DC5EA
+                Linked Logon ID:                0x0
+                Network Account Name:   -
+                Network Account Domain: -
+                Logon GUID:             {00000000-0000-0000-0000-000000000000}
+
+              Process Information:
+                Process ID:             0x0
+                Process Name:           -
+
+              Network Information:
+                Workstation Name:       KALI01
+                Source Network Address: 192.168.190.11
+                Source Port:            42130
+
+              Detailed Authentication Information:
+                Logon Process:          NtLmSsp
+                Authentication Package: NTLM
+                Transited Services:     -
+                Package Name (NTLM only):       NTLM V2
+                Key Length:             128
+
+              This event is generated when a logon session is created. It is generated on the computer that was accessed.
+
+              The subject fields indicate the account on the local system which requested the logon. This is most commonly a service
+              such as the Server service, or a local process such as Winlogon.exe or Services.exe.
+
+              The logon type field indicates the kind of logon that occurred. The most common types are 2 (interactive) and 3 (network).
+
+              The New Logon fields indicate the account for whom the new logon was created, i.e. the account that was logged on.
+
+              The network fields indicate where a remote logon request originated. Workstation name is not always available and may be
+              left blank in some cases.
+
+              The impersonation level field indicates the extent to which a process in the logon session can impersonate.
+
+              The authentication information fields provide detailed information about this specific logon request.
+                - Logon GUID is a unique identifier that can be used to correlate this event with a KDC event.
+                - Transited services indicate which intermediate services have participated in this logon request.
+                - Package name indicates which sub-protocol was used among the NTLM protocols.
+                - Key length indicates the length of the generated session key. This will be 0 if no session key was requested.
+```
+
+list local `Administrators` group:
+```WS01
+PS C:\WINDOWS\system32> Get-LocalGroupMember -Group "Administrators" | Select-Object Name,ObjectClass,PrincipalSource
+
+Name               ObjectClass PrincipalSource
+----               ----------- ---------------
+PSL\Domain Admins  Group       ActiveDirectory
+PSL\kbennett       User        ActiveDirectory
+WS01\Administrator User                  Local
+WS01\ws01-admin    User                  Local
+```
+
+remove `kbennett` from local `Administrators`:
+```WS01
+PS C:\WINDOWS\system32> Remove-LocalGroupMember -Group "Administrators" -Member "PSL\kbennett" -ErrorAction Stop
+```
+verify:
+```WS01
+PS C:\WINDOWS\system32> Get-LocalGroupMember -Group "Administrators" | Select-Object Name,ObjectClass,PrincipalSource
+
+Name               ObjectClass PrincipalSource
+----               ----------- ---------------
+PSL\Domain Admins  Group       ActiveDirectory
+WS01\Administrator User                  Local
+WS01\ws01-admin    User                  Local
+```
+
+collect event `4733`:
+```WS01
+PS C:\WINDOWS\system32> Get-WinEvent -FilterHashtable @{LogName="Security";Id=4733;StartTime=(Get-Date).AddMinutes(-15)} | Select-Object -First 1 TimeCreated,Id,RecordId,MachineName,KeywordsDisplayNames,Message | Format-List
+
+
+TimeCreated          : 9/14/2026 7:57:26 PM
+Id                   : 4733
+RecordId             : 36755
+MachineName          : WS01.ad.pearsonspecterlitt.com
+KeywordsDisplayNames : {Audit Success}
+Message              : A member was removed from a security-enabled local group.
+
+                       Subject:
+                        Security ID:            S-1-5-21-812095790-3273921031-1418192876-1001
+                        Account Name:           ws01-admin
+                        Account Domain:         WS01
+                        Logon ID:               0x5A843
+
+                       Member:
+                        Security ID:            S-1-5-21-1881315258-3822834566-1441680494-1106
+                        Account Name:           -
+
+                       Group:
+                        Security ID:            S-1-5-32-544
+                        Group Name:             Administrators
+                        Group Domain:           Builtin
+
+                       Additional Information:
+                        Privileges:             -
+```
+
+test her current access to `C$` on `KALI01`:
+```KALI01
+┌──(jerry㉿kali01)-[~]
+└─$ smbclient '//WS01.ad.pearsonspecterlitt.com/C$' -U 'PSL/kbennett' -c 'ls'
+Password for [PSL\kbennett]:
+tree connect failed: NT_STATUS_ACCESS_DENIED
+```
+
+what's next:
+1. prepare the github project overview, summarize the three completed scenarios, and link their evidence logs
