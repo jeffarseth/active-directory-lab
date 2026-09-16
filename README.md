@@ -8,7 +8,7 @@
 </div>
 
 ---
-<br>
+
 A hands-on Active Directory security lab demonstrating
 practical IT and security skills.
 
@@ -32,7 +32,7 @@ Network: VMware host-only (VMnet1), no external routes
 
 <div align="center">
 
-<img src="overview.svg" alt="Lab topology" width="700">
+<img src="overview.png" alt="Lab topology" width="700">
 
 </div>
 
