@@ -75,7 +75,7 @@ AS-REP hash without credentials. Hashcat cracked it offline.
 **Verified:** GetNPUsers can no longer capture a hash
 
 ### Scenario 3: Excessive local administrator access
-[`docs/2026-09-14 log.txt`](docs/2026-09-14%20.txt)
+[`docs/2026-09-14 log.txt`](docs/2026-09-14%20log.txt)
 
 An associate (kbennett) was a member of WS01's local
 Administrators group. She connected from KALI01 via NTLM and
