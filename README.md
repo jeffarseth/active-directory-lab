@@ -6,7 +6,7 @@
 
 </div>
 
-A hands-on Active Directory security lab demonstrating practical IT and security skills.
+A hands-on Active Directory security lab with misconfigured access controls that will have real consequences for client confidentiality.
 
 Scenario: a fictional law firm running Windows Server 2025 and Windows 11 workstations on an isolated VMware network.
 
@@ -62,7 +62,7 @@ role connected from KALI01 and read a mock confidential file.
 retains access
 
 ### Scenario 2: AS-REP roasting
-[`docs/2026-09-13.txt`](docs/2026-09-13.txt)
+[`docs/2026-09-13 log.txt`](docs/2026-09-13%20log.txt)
 
 A dedicated test account was created with Kerberos
 preauthentication disabled. Impacket's GetNPUsers captured the encrypted
@@ -75,10 +75,10 @@ AS-REP hash without credentials. Hashcat cracked it offline.
 **Verified:** GetNPUsers can no longer capture a hash
 
 ### Scenario 3: Excessive local administrator access
-[`docs/2026-09-14.txt`](docs/2026-09-14.txt)
+[`docs/2026-09-14 log.txt`](docs/2026-09-14%20.txt)
 
 An associate (kbennett) was a member of WS01's local
-Administrators group. She connected from Kali01 via NTLM and
+Administrators group. She connected from KALI01 via NTLM and
 authenticated to C$.
 
 **Evidence:** Events 4624 (logon) and 4733 (removal)
