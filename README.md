@@ -3,21 +3,16 @@
 <div align="center">
 
 # ACTIVE DIRECTORY LAB
-### Pearson Specter Litt
 
 </div>
 
----
+A hands-on Active Directory security lab demonstrating practical IT and security skills.
 
-A hands-on Active Directory security lab demonstrating
-practical IT and security skills.
-
-Scenario: a fictional law firm running Windows Server 2025 and Windows 11 workstations
-on an isolated VMware network.
+Scenario: a fictional law firm running Windows Server 2025 and Windows 11 workstations on an isolated VMware network.
 
 ---
 
-## Environment
+### Environment
 
 | VM     | Role                   | OS                  | Address          | Assignment |
 |--------|------------------------|---------------------|------------------|------------|
@@ -38,7 +33,7 @@ Network: VMware host-only (VMnet1), no external routes
 
 ---
 
-## What was built
+### What was built
 
 - Windows Server 2025 domain controller promoted from scratch.
 - OU structure based on departments: Legal, Administration,
@@ -53,7 +48,7 @@ Network: VMware host-only (VMnet1), no external routes
 ## Security scenarios
 
 ### Scenario 1: SMB share over-permission
-`docs/2026-09-09.txt`, `docs/2026-09-11.txt`
+[`docs/2026-09-09 log.txt`](docs/2026-09-09%20log.txt), [`docs/2026-09-11 log.txt`](docs/2026-09-11%20log.txt)
 
 The PSL-Support-Private share on WS01 granted read access to
 Domain Users. An associate account (kbennett) with no support
@@ -67,7 +62,7 @@ role connected from KALI01 and read a mock confidential file.
 retains access
 
 ### Scenario 2: AS-REP roasting
-`docs/2026-09-13.txt`
+[`docs/2026-09-13.txt`](docs/2026-09-13.txt)
 
 A dedicated test account was created with Kerberos
 preauthentication disabled. Impacket's GetNPUsers captured the encrypted
@@ -80,21 +75,23 @@ AS-REP hash without credentials. Hashcat cracked it offline.
 **Verified:** GetNPUsers can no longer capture a hash
 
 ### Scenario 3: Excessive local administrator access
-`docs/2026-09-14.txt`
+[`docs/2026-09-14.txt`](docs/2026-09-14.txt)
 
 An associate (kbennett) was a member of WS01's local
 Administrators group. She connected from Kali01 via NTLM and
 authenticated to C$.
 
 **Evidence:** Events 4624 (logon) and 4733 (removal)
+
 **Fix:** Removed kbennett from local Administrators
+
 **Verified:** C$ access returns NT_STATUS_ACCESS_DENIED
 
 ---
 
-## Build logs
+### Build logs
 
-All sessions are in `docs/`. Each file contains timestamps,
+All sessions are in [`docs/`](docs/). Each file contains timestamps,
 commands, real output, dead ends, and the reasoning behind
 decisions - not a clean walkthrough written from memory.
 
